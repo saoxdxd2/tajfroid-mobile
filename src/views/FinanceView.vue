@@ -121,7 +121,7 @@
           </div>
           <div class="right">
             <strong>{{ e.amount }} DH</strong>
-            <button @click="removeExpense(e.id)" class="danger small">Archive</button>
+            <button @click="removeExpense(e)" class="danger small">Archive</button>
           </div>
         </li>
       </ul>
@@ -235,9 +235,9 @@ async function addExpense() {
   }
 }
 
-async function removeExpense(id) {
+async function removeExpense(exp) {
   if (!confirm('Archive this expense?')) return
-  try { await store.archiveExpense(id) } catch (e) { alert(e.message) }
+  try { await store.archiveExpense(exp.id, exp.updatedAt) } catch (e) { alert(e.message) }
 }
 </script>
 

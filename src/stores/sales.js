@@ -90,9 +90,19 @@ export const useSalesStore = defineStore('sales', () => {
     await fetchInvoices()
   }
 
-  async function archive(id) {
-    const res = await apiFetch(`/api/invoices/manage?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
-    if (!res.ok) throw new Error(await readError(res, 'Failed to archive invoice'))
+  async function archive(id, baseUpdatedAt) {
+    const q = baseUpdatedAt ? `&baseUpdatedAt=${encodeURIComponent(baseUpdatedAt)}` : ''
+    try {
+      const res = await apiFetch(`/api/invoices/manage?id=${encodeURIComponent(id)}${q}`, { method: 'DELETE' })
+      if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e }
+      if (!res.ok) throw new Error(await readError(res, 'Failed to archive invoice'))
+    } catch (e) {
+      if (!e.conflict && (!navigator.onLine || e instanceof TypeError)) {
+        await useMutationStore().enqueue({ method: 'DELETE', path: `/api/invoices/manage?id=${encodeURIComponent(id)}${q}`, body: null, entity: 'invoice', entityId: id, baseUpdatedAt })
+        return
+      }
+      throw e
+    }
     await fetchInvoices()
   }
 

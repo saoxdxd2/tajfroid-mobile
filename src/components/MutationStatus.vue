@@ -10,14 +10,19 @@
       <div v-for="m in items" :key="m.id" class="item" :class="m.status">
         <div class="meta">
           <span class="badge">{{ m.status }}</span>
-          <span>{{ m.method }} {{ m.path }}</span>
+          <span>{{ m.entity || 'mutation' }} {{ m.method }}</span>
         </div>
+        <div class="path">{{ m.path }}</div>
         <div v-if="m.lastError" class="err">{{ m.lastError }}</div>
+        <details v-if="m.body" class="payload"><summary>Payload</summary><pre>{{ pretty(m.body) }}</pre></details>
         <div class="actions">
-          <button v-if="m.status==='conflict'" @click="retry(m.id)">Retry</button>
-          <button @click="remove(m.id)">Dismiss</button>
+          <button v-if="m.status==='conflict'" @click="retry(m.id)">Retry local</button>
+          <button v-if="m.status==='conflict'" @click="dismiss(m.id)">Keep server (dismiss)</button>
+          <button v-if="m.status!=='conflict'" @click="retry(m.id)">Retry</button>
+          <button v-if="m.status!=='conflict'" @click="remove(m.id)">Dismiss</button>
         </div>
       </div>
+      <p class="hint">Conflicts mean another device changed the same record. "Retry local" resends your payload; "Keep server" discards your queued change.</p>
     </div>
   </div>
 </template>
@@ -33,6 +38,8 @@ const pending = computed(() => items.value.filter(i => i.status === 'pending').l
 const conflicts = computed(() => items.value.filter(i => i.status === 'conflict').length)
 function retry(id) { store.retry(id) }
 function remove(id) { store.remove(id) }
+function dismiss(id) { store.remove(id) }
+function pretty(v) { try { return JSON.stringify(v, null, 2) } catch { return String(v) } }
 </script>
 
 <style scoped>
@@ -44,7 +51,10 @@ function remove(id) { store.remove(id) }
 .item.conflict .badge { background: #b71c1c; }
 .meta { display: flex; gap: 8px; align-items: center; }
 .badge { background: #8a6d00; color: #fff; padding: 1px 6px; border-radius: 10px; font-size: 11px; }
+.path { color: #555; word-break: break-all; }
 .err { color: #7a1a00; margin: 4px 0; white-space: pre-wrap; }
-.actions { display: flex; gap: 8px; }
+.payload pre { max-height: 120px; overflow: auto; background: #fff; padding: 4px; margin: 4px 0; font-size: 11px; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .actions button { font-size: 11px; padding: 2px 8px; }
+.hint { color: #555; margin: 8px 0 0; }
 </style>

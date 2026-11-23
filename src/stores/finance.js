@@ -63,11 +63,19 @@ export const useFinanceStore = defineStore('finance', () => {
   async function setCheckStatus(id, status, baseUpdatedAt) {
     const payload = { status }
     if (baseUpdatedAt) payload.baseUpdatedAt = baseUpdatedAt
-    const res = await apiFetch(`/api/checks/manage?id=${encodeURIComponent(id)}`, {
-      method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(payload),
-    })
-    if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e }
-    if (!res.ok) throw new Error(await readError(res, 'Failed to update check'))
+    try {
+      const res = await apiFetch(`/api/checks/manage?id=${encodeURIComponent(id)}`, {
+        method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(payload),
+      })
+      if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e }
+      if (!res.ok) throw new Error(await readError(res, 'Failed to update check'))
+    } catch (e) {
+      if (!e.conflict && (!navigator.onLine || e instanceof TypeError)) {
+        await useMutationStore().enqueue({ method: 'PUT', path: `/api/checks/manage?id=${encodeURIComponent(id)}`, body: payload, entity: 'check', entityId: id, baseUpdatedAt })
+        return
+      }
+      throw e
+    }
     await fetchChecks()
     await fetchSummary()
   }
@@ -103,11 +111,19 @@ export const useFinanceStore = defineStore('finance', () => {
     }
   }
 
-  async function archiveExpense(id) {
-    const res = await apiFetch(`/api/expenses/manage?id=${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-    })
-    if (!res.ok) throw new Error(await readError(res, 'Failed to archive expense'))
+  async function archiveExpense(id, baseUpdatedAt) {
+    const q = baseUpdatedAt ? `&baseUpdatedAt=${encodeURIComponent(baseUpdatedAt)}` : ''
+    try {
+      const res = await apiFetch(`/api/expenses/manage?id=${encodeURIComponent(id)}${q}`, { method: 'DELETE' })
+      if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e }
+      if (!res.ok) throw new Error(await readError(res, 'Failed to archive expense'))
+    } catch (e) {
+      if (!e.conflict && (!navigator.onLine || e instanceof TypeError)) {
+        await useMutationStore().enqueue({ method: 'DELETE', path: `/api/expenses/manage?id=${encodeURIComponent(id)}${q}`, body: null, entity: 'expense', entityId: id, baseUpdatedAt })
+        return
+      }
+      throw e
+    }
     await fetchExpenses()
   }
 

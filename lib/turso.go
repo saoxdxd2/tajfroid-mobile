@@ -131,5 +131,5 @@ func isRetryable(err error) bool {
 }
 
 func Text(v string) TursoArg { return TursoArg{Type: "text", Value: v} }
-func Int(v int64) TursoArg   { return TursoArg{Type: "integer", Value: v} }
-func Null() TursoArg         { return TursoArg{Type: "null", Value: nil} }
+func Int(v int64) TursoArg   { return TursoArg{Type: "integer", Value: fmt.Sprintf("%d", v)} }
+func Null() TursoArg         { return TursoArg{Type: "null"} }

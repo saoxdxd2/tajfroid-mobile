@@ -157,6 +157,7 @@ async function saveEdit() {
       active: editForm.value.active,
       category: editForm.value.category,
       brand: editForm.value.brand,
+      baseCatalogVersion: store.catalogVersion || undefined,
     })
     editing.value = null
   } catch (e) {

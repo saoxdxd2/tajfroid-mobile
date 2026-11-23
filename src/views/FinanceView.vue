@@ -216,9 +216,11 @@ async function addCheck() {
 async function move(check, status) {
   if (!confirm(`Move check #${check.checkNumber} to ${status}?`)) return
   try {
-    await store.setCheckStatus(check.id, status)
+    await store.setCheckStatus(check.id, status, check.updatedAt)
   } catch (e) {
-    alert(e.message)
+    if (e.conflict) alert('Conflict: check changed on another device. Refreshing.')
+    else alert(e.message)
+    await store.fetchChecks()
   }
 }
 

@@ -14,7 +14,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		q := `SELECT c.id, c.check_number, c.direction, c.status, c.amount, c.due_date,
-			c.bank, c.party_name, c.customer_id, c.supplier_id, c.notes, c.created_at
+			c.bank, c.party_name, c.customer_id, c.supplier_id, c.notes, c.created_at, c.updated_at
 			FROM checks c`
 		args := []lib.TursoArg{}
 		status := r.URL.Query().Get("status")
@@ -35,7 +35,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 				"status": row[3], "amount": row[4], "dueDate": row[5],
 				"bank": nullableStr(row[6]), "partyName": row[7],
 				"customerId": nullableStr(row[8]), "supplierId": nullableStr(row[9]),
-				"notes": nullableStr(row[10]), "createdAt": row[11],
+				"notes": nullableStr(row[10]), "createdAt": row[11], "updatedAt": row[12],
 			})
 		}
 		w.Header().Set("Content-Type", "application/json")

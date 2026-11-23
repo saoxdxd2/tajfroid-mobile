@@ -17,6 +17,10 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		ver := int64(0)
+		if m, err := db.Execute("SELECT version FROM catalog_meta WHERE id=1"); err == nil && len(m.Rows) > 0 {
+			ver = lib.ToInt64(m.Rows[0][0])
+		}
 		items := []map[string]interface{}{}
 		for _, row := range res.Rows {
 			items = append(items, map[string]interface{}{
@@ -33,7 +37,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"products": items})
+		json.NewEncoder(w).Encode(map[string]interface{}{"products": items, "catalogVersion": ver})
 
 	case http.MethodPost:
 		var body struct {

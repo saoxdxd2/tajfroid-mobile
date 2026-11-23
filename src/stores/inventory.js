@@ -6,6 +6,7 @@ export const useInventoryStore = defineStore('inventory', () => {
   const products = ref([])
   const categories = ref([])
   const brands = ref([])
+  const catalogVersion = ref(0)
   const loading = ref(false)
   const error = ref('')
 
@@ -17,6 +18,7 @@ export const useInventoryStore = defineStore('inventory', () => {
       if (!res.ok) throw new Error(await readError(res, 'Failed to fetch products'))
       const data = await res.json()
       products.value = data.products || []
+      if (data.catalogVersion !== undefined) catalogVersion.value = data.catalogVersion
     } catch (e) {
       error.value = e.message
     } finally {
@@ -128,7 +130,7 @@ export const useInventoryStore = defineStore('inventory', () => {
   }
 
   return {
-    products, categories, brands, loading, error,
+    products, categories, brands, catalogVersion, loading, error,
     fetchProducts, fetchCategories, fetchBrands,
     createProduct, updateProduct, deleteProduct,
     createCategory, deleteCategory,

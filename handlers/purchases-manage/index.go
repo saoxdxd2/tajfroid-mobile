@@ -233,8 +233,8 @@ func purchaseJournalStmt(row []interface{}, now int64) lib.TursoStmt {
 
 func catalogMetaStmt(now int64) lib.TursoStmt {
 	return lib.TursoStmt{
-		SQL:  "INSERT INTO catalog_meta (id, version, updated_at) VALUES (1, 1, ?) ON CONFLICT(id) DO UPDATE SET version = version + 1, updated_at = excluded.updated_at",
-		Args: []lib.TursoArg{lib.Int(now)},
+		SQL:  lib.CatalogMetaBumpSQL,
+		Args: []lib.TursoArg{lib.Int(now), lib.Int(now)},
 	}
 }
 

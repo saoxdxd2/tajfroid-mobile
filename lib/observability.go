@@ -125,6 +125,26 @@ func (s *StatusWriter) Status() int {
 
 func (s *StatusWriter) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
+// WroteHeader reports whether a handler already committed a response. The
+// router uses it to avoid writing a panic response on top of one.
+func (s *StatusWriter) WroteHeader() bool { return s.status != 0 }
+
+// SafeMethod bounds the method written to logs. A method is never used as a
+// metric key, but it is caller-controlled and must stay printable and small.
+func SafeMethod(method string) string {
+	if method == "" || len(method) > 32 {
+		return "UNKNOWN"
+	}
+	for i := 0; i < len(method); i++ {
+		c := method[i]
+		letter := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+		if !letter && (c < '0' || c > '9') && c != '-' && c != '.' {
+			return "UNKNOWN"
+		}
+	}
+	return method
+}
+
 // RequestLog is the structured, single-line record emitted at request
 // completion. It never contains request bodies, tokens or raw error strings.
 type RequestLog struct {

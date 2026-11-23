@@ -181,7 +181,7 @@ async function idbDelete(clientId) {
 }
 
 function rowAgeMs(item) {
-  const raw = item.updatedAt || item.capturedAt || 0
+  const raw = (item && (item.updatedAt || item.capturedAt)) || 0
   return Date.now() - (raw > 1e12 ? raw : raw * 1000)
 }
 
@@ -240,6 +240,23 @@ function normalizeStatus(s) {
   return s
 }
 
+// Stored rows can be damaged by an interrupted migration or an old client.
+// Keep rows with a client id, repair their metadata, and ignore the rest so a
+// single corrupt row cannot take down the whole scan queue.
+function normalizeScanRow(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const clientId = typeof raw.clientId === 'string' && raw.clientId ? raw.clientId : null
+  if (!clientId) return null
+  const meta = { ...raw }
+  delete meta.ciphertextB64
+  meta.clientId = clientId
+  meta.status = normalizeStatus(meta.status)
+  meta.capturedAt = Number(meta.capturedAt) || 0
+  meta.updatedAt = Number(meta.updatedAt) || meta.capturedAt
+  meta.attempts = Number.isFinite(Number(meta.attempts)) ? Number(meta.attempts) : 0
+  return meta
+}
+
 export const useQueueStore = defineStore('queue', () => {
   const items = ref([])
   const syncing = ref(false)
@@ -247,13 +264,10 @@ export const useQueueStore = defineStore('queue', () => {
 
   async function load() {
     const all = await idbGetAll()
-    all.sort((a, b) => (b.capturedAt || 0) - (a.capturedAt || 0))
-    items.value = all.map(x => {
-      // Defensive: legacy rows (or a failed migration) may still carry it.
-      const meta = { ...x }
-      delete meta.ciphertextB64
-      return meta
-    })
+    items.value = all
+      .map(normalizeScanRow)
+      .filter(Boolean)
+      .sort((a, b) => (b.capturedAt || 0) - (a.capturedAt || 0))
     await pruneTerminal()
   }
 
@@ -263,7 +277,9 @@ export const useQueueStore = defineStore('queue', () => {
     const terminal = await idbGetByStatuses(TERMINAL_STATUSES)
     if (!terminal.length) return
     terminal.sort((a, b) => (b.updatedAt || b.capturedAt || 0) - (a.updatedAt || a.capturedAt || 0))
-    const stale = terminal.filter((x, i) => i >= MAX_TERMINAL_ROWS || rowAgeMs(x) > TERMINAL_TTL_MS)
+    const stale = terminal
+      .filter(x => x && x.clientId)
+      .filter((x, i) => i >= MAX_TERMINAL_ROWS || rowAgeMs(x) > TERMINAL_TTL_MS)
     if (!stale.length) return
     const ids = stale.map(x => x.clientId)
     await idbDeleteMany(ids)
@@ -272,6 +288,7 @@ export const useQueueStore = defineStore('queue', () => {
   }
 
   function upsertLocal(item) {
+    if (!item || typeof item !== 'object' || !item.clientId) return
     const idx = items.value.findIndex(x => x.clientId === item.clientId)
     const safe = { ...item }
     delete safe.ciphertextB64

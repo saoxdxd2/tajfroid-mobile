@@ -3,7 +3,7 @@
   "short_name": "TajFroid",
   "description": "Mobile scanner for Taj-Froid ERP",
   "theme_color": "#1f3a5f",
-  "background_color": "#ffffff",
+  "background_color": "#1f3a5f",
   "display": "standalone",
   "start_url": "/",
   "icons": [

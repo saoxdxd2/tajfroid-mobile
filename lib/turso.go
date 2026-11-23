@@ -15,6 +15,17 @@ import (
 	"time"
 )
 
+const maxTursoResponseBytes = 16 << 20
+
+// CatalogMetaBumpSQL advances both the phone-facing sync cursor (version) and
+// the conflict-detection revision (updated_at) without ever moving either
+// backwards. Callers pass a time-based hint; the CASE expressions pick the
+// larger value and add one, so every catalog mutation produces a new cursor.
+const CatalogMetaBumpSQL = `INSERT INTO catalog_meta (id, version, updated_at) VALUES (1, ?, ?) ` +
+	`ON CONFLICT(id) DO UPDATE SET ` +
+	`version = CASE WHEN catalog_meta.version >= excluded.version THEN catalog_meta.version + 1 ELSE excluded.version END, ` +
+	`updated_at = CASE WHEN catalog_meta.updated_at >= excluded.updated_at THEN catalog_meta.updated_at + 1 ELSE excluded.updated_at END`
+
 type TursoClient struct {
 	URL   string
 	Token string
@@ -183,14 +194,21 @@ func (c *TursoClient) doPipeline(ctx context.Context, body TursoPipelineBody, re
 			}
 			return TursoResponse{}, err
 		}
-		raw, readErr := io.ReadAll(resp.Body)
+		// A misbehaving (or intercepted) upstream must not be able to make a
+		// warm invocation allocate an unbounded response. 16 MiB is well above
+		// the largest legitimate scan/catalog pipeline response.
+		raw, readErr := io.ReadAll(io.LimitReader(resp.Body, maxTursoResponseBytes+1))
 		resp.Body.Close()
 		if readErr != nil {
 			return TursoResponse{}, readErr
 		}
+		if len(raw) > maxTursoResponseBytes {
+			return TursoResponse{}, errors.New("database response too large")
+		}
 		var tr TursoResponse
 		if err := json.Unmarshal(raw, &tr); err != nil {
-			return TursoResponse{}, fmt.Errorf("parse: %w (%s)", err, string(raw))
+			// Never embed the raw body: it can contain tokens or row data.
+			return TursoResponse{}, fmt.Errorf("parse database response: %w", err)
 		}
 		return tr, nil
 	}

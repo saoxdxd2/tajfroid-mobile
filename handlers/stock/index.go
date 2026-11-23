@@ -74,7 +74,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 				json.NewEncoder(w).Encode(map[string]interface{}{"error": "conflict: stock changed on another device", "currentStock": actual})
 				return
 			}
-			db.Execute("INSERT INTO catalog_meta (id, version, updated_at) VALUES (1, 1, ?) ON CONFLICT(id) DO UPDATE SET version = version + 1, updated_at = excluded.updated_at", lib.Int(now))
+			db.Execute(lib.CatalogMetaBumpSQL, lib.Int(now), lib.Int(now))
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{"sku": body.SKU, "oldStock": *body.BaseStock, "newStock": newStock})
 			return
@@ -93,7 +93,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		}
 		now := time.Now().Unix()
 		db.Execute("UPDATE catalog SET stock=? WHERE sku=?", lib.Int(int64(newStock)), lib.Text(body.SKU))
-		db.Execute("INSERT INTO catalog_meta (id, version, updated_at) VALUES (1, 1, ?) ON CONFLICT(id) DO UPDATE SET version = version + 1, updated_at = excluded.updated_at", lib.Int(now))
+		db.Execute(lib.CatalogMetaBumpSQL, lib.Int(now), lib.Int(now))
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{"sku": body.SKU, "oldStock": current, "newStock": newStock})
 

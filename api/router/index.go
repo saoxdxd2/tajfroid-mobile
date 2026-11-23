@@ -9,7 +9,9 @@
 package handler
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -55,6 +57,10 @@ import (
 	"tajfroid-mobile/lib"
 )
 
+// The agent catalog rebuild is the largest legitimate payload (16 MiB); leave
+// headroom for JSON overhead while still bounding what one invocation can read.
+const maxRequestBodyBytes = 20 << 20
+
 func Handler(w http.ResponseWriter, r *http.Request) {
 	// Observability wraps the whole router: request id, one structured log
 	// line and a latency sample are emitted even for auth/404 short circuits.
@@ -83,7 +89,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			Timestamp:     time.Now().UTC().Format(time.RFC3339Nano),
 			RequestID:     requestID,
 			Route:         routeLabel,
-			Method:        r.Method,
+			Method:        lib.SafeMethod(r.Method),
 			Status:        status,
 			DurationMS:    lib.DurationMS(elapsed),
 			ErrorCategory: lib.ErrorCategory(status),
@@ -97,11 +103,28 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		lib.DefaultMetrics.Record(routeLabel, status, elapsed)
 	}()
 
+	// Last line of defence: a handler bug must never abort the invocation.
+	// The panic value is discarded because it can contain row data or tokens.
+	defer func() {
+		if recover() == nil {
+			return
+		}
+		if !observed.WroteHeader() {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
+	}()
+
 	// Bound the whole fan-out so a hung Turso call cannot hold a Vercel
 	// invocation until the 15s HTTP backstop.
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
 	r = r.WithContext(ctx)
+
+	// Read at most once, with a hard ceiling. Handlers that ignore JSON decode
+	// errors must never see a half-parsed oversized body.
+	if !boundRequestBody(w, r) {
+		return
+	}
 
 	// Opt-in observability endpoint. It is intentionally indistinguishable
 	// from an unknown route unless the flag is enabled, and it never carries
@@ -236,6 +259,29 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// boundRequestBody caps the request body before any handler sees it. A
+// chunked request with no Content-Length is capped by LimitReader as well.
+func boundRequestBody(w http.ResponseWriter, r *http.Request) bool {
+	if r.Body == nil || r.Body == http.NoBody {
+		return true
+	}
+	if r.ContentLength > maxRequestBodyBytes {
+		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+		return false
+	}
+	buf, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBodyBytes+1))
+	if err != nil {
+		http.Error(w, "unable to read request body", http.StatusBadRequest)
+		return false
+	}
+	if len(buf) > maxRequestBodyBytes {
+		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+		return false
+	}
+	r.Body = io.NopCloser(bytes.NewReader(buf))
+	return true
 }
 
 // withID injects the captured scan id as a query parameter, matching the

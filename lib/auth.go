@@ -12,6 +12,11 @@ var (
 	ErrInvalidToken = errors.New("invalid or revoked token")
 )
 
+// Real tokens are short (lib.NewToken creates 64 hex characters). Bounding the
+// accepted header keeps a hostile caller from making every request hash an
+// arbitrarily large blob before the lookup is rejected.
+const maxTokenLen = 4096
+
 type Identity struct {
 	Kind string
 	ID   string
@@ -26,24 +31,50 @@ func WithIdentity(r *http.Request, id Identity) *http.Request {
 }
 
 func IdentityFrom(r *http.Request) (Identity, bool) {
+	if r == nil {
+		return Identity{}, false
+	}
 	id, ok := r.Context().Value(identityKey{}).(Identity)
 	return id, ok
+}
+
+// bearerToken parses and bounds the Authorization header without ever putting
+// the raw token in an error message.
+func bearerToken(header string) (string, error) {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return "", ErrMissingToken
+	}
+	const prefix = "Bearer "
+	if len(header) <= len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
+		return "", ErrMissingToken
+	}
+	token := strings.TrimSpace(header[len(prefix):])
+	if token == "" {
+		return "", ErrMissingToken
+	}
+	if len(token) > maxTokenLen {
+		return "", ErrInvalidToken
+	}
+	for i := 0; i < len(token); i++ {
+		if token[i] < 0x20 || token[i] > 0x7e {
+			return "", ErrInvalidToken
+		}
+	}
+	return token, nil
 }
 
 // Authenticate accepts either a paired phone device token or a desktop agent
 // token. Both are stored as SHA-256 hashes, never in clear text.
 func Authenticate(r *http.Request) (Identity, error) {
-	header := strings.TrimSpace(r.Header.Get("Authorization"))
-	if header == "" {
+	if r == nil {
 		return Identity{}, ErrMissingToken
 	}
-	const prefix = "Bearer "
-	if len(header) <= len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
-		return Identity{}, ErrMissingToken
-	}
-	token := strings.TrimSpace(header[len(prefix):])
-	if token == "" {
-		return Identity{}, ErrMissingToken
+	// Header.Get returns only the first value when a client sends duplicate
+	// Authorization headers, so one request can never trigger two lookups.
+	token, err := bearerToken(r.Header.Get("Authorization"))
+	if err != nil {
+		return Identity{}, err
 	}
 	hash := Sha256Hex(token)
 	db := NewTurso()
@@ -63,16 +94,19 @@ func Authenticate(r *http.Request) (Identity, error) {
 }
 
 // RequireAuth authenticates once per request and returns the identity for the
-// router to attach via WithIdentity.
+// router to attach via WithIdentity. Transport/database errors are reported as
+// a fixed message: upstream error strings can contain raw response bodies.
 func RequireAuth(w http.ResponseWriter, r *http.Request) (Identity, bool) {
 	id, err := Authenticate(r)
 	if err == nil {
 		return id, true
 	}
 	status := http.StatusUnauthorized
+	message := err.Error()
 	if err != ErrMissingToken && err != ErrInvalidToken {
 		status = http.StatusInternalServerError
+		message = "authentication temporarily unavailable"
 	}
-	http.Error(w, err.Error(), status)
+	http.Error(w, message, status)
 	return Identity{}, false
 }

@@ -10,6 +10,9 @@ import (
 const (
 	deviceTokenIndex = "idx_devices_token_hash"
 	agentTokenIndex  = "idx_agent_tokens_token_hash"
+	// A healthy index query returns at most these two names. Cap the scan of a
+	// malformed upstream response instead of iterating an unbounded row set.
+	maxIndexRows = 128
 )
 
 // healthResponse keeps the legacy "ok" field while adding the richer status,
@@ -81,11 +84,19 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 	resp := newHealthResponse("ok", latencyMS)
 	resp.Checks["database"] = true
-	for _, row := range results[1].Rows {
+	for i, row := range results[1].Rows {
+		if i >= maxIndexRows {
+			break
+		}
 		if len(row) == 0 {
 			continue
 		}
-		name := lib.ToString(row[0])
+		// Only a plain index name is meaningful. Never stringify arbitrary
+		// nested values from a corrupt upstream response.
+		name, ok := lib.Unwrap(row[0]).(string)
+		if !ok {
+			continue
+		}
 		if _, known := resp.Indexes[name]; known {
 			resp.Indexes[name] = true
 		}

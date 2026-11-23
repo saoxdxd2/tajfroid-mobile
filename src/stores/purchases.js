@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiFetch, readError, jsonHeaders } from '../lib/api'
+import { useMutationStore } from './mutations'
 
 
 export const usePurchaseStore = defineStore('purchases', () => {
@@ -43,13 +44,21 @@ export const usePurchaseStore = defineStore('purchases', () => {
   async function create(payload) {
     const body = { ...payload }
     if (!body.id) body.id = crypto.randomUUID()
-    const res = await apiFetch('/api/purchases', {
-      method: 'POST', headers: jsonHeaders(), body: JSON.stringify(body),
-    })
-    if (!res.ok) throw new Error(await readError(res, 'Failed to create purchase'))
-    const data = await res.json()
-    await fetchAll()
-    return data
+    try {
+      const res = await apiFetch('/api/purchases', {
+        method: 'POST', headers: jsonHeaders(), body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error(await readError(res, 'Failed to create purchase'))
+      const data = await res.json()
+      await fetchAll()
+      return data
+    } catch (e) {
+      if (!navigator.onLine || e instanceof TypeError) {
+        await useMutationStore().enqueue({ method: 'POST', path: '/api/purchases', body, entity: 'purchase', entityId: body.id })
+        return { id: body.id, queued: true }
+      }
+      throw e
+    }
   }
 
   async function update(id, payload) {

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiFetch, readError, jsonHeaders } from '../lib/api'
+import { useMutationStore } from './mutations'
 
 
 export const useFinanceStore = defineStore('finance', () => {
@@ -43,12 +44,20 @@ export const useFinanceStore = defineStore('finance', () => {
   async function createCheck(payload) {
     const body = { ...payload }
     if (!body.id) body.id = crypto.randomUUID()
-    const res = await apiFetch('/api/checks', {
-      method: 'POST', headers: jsonHeaders(), body: JSON.stringify(body),
-    })
-    if (!res.ok) throw new Error(await readError(res, 'Failed to create check'))
-    await fetchChecks()
-    return res.json()
+    try {
+      const res = await apiFetch('/api/checks', {
+        method: 'POST', headers: jsonHeaders(), body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error(await readError(res, 'Failed to create check'))
+      await fetchChecks()
+      return res.json()
+    } catch (e) {
+      if (!navigator.onLine || e instanceof TypeError) {
+        await useMutationStore().enqueue({ method: 'POST', path: '/api/checks', body, entity: 'check', entityId: body.id })
+        return { id: body.id, queued: true }
+      }
+      throw e
+    }
   }
 
   async function setCheckStatus(id, status, baseUpdatedAt) {
@@ -77,13 +86,21 @@ export const useFinanceStore = defineStore('finance', () => {
   async function createExpense(payload) {
     const body = { ...payload }
     if (!body.id) body.id = crypto.randomUUID()
-    const res = await apiFetch('/api/expenses', {
-      method: 'POST', headers: jsonHeaders(), body: JSON.stringify(body),
-    })
-    if (!res.ok) throw new Error(await readError(res, 'Failed to create expense'))
-    await fetchExpenses()
-    await fetchSummary()
-    return res.json()
+    try {
+      const res = await apiFetch('/api/expenses', {
+        method: 'POST', headers: jsonHeaders(), body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error(await readError(res, 'Failed to create expense'))
+      await fetchExpenses()
+      await fetchSummary()
+      return res.json()
+    } catch (e) {
+      if (!navigator.onLine || e instanceof TypeError) {
+        await useMutationStore().enqueue({ method: 'POST', path: '/api/expenses', body, entity: 'expense', entityId: body.id })
+        return { id: body.id, queued: true }
+      }
+      throw e
+    }
   }
 
   async function archiveExpense(id) {

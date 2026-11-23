@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { apiFetch, jsonHeaders, readError } from '../lib/api' 
+import { apiFetch, jsonHeaders, readError } from '../lib/api'
+import { useMutationStore } from './mutations' 
 
 export const useSalesStore = defineStore('sales', () => {
   const invoices = ref([])
@@ -43,13 +44,21 @@ export const useSalesStore = defineStore('sales', () => {
   async function createInvoice(payload) {
     const body = { ...payload }
     if (!body.id) body.id = crypto.randomUUID()
-    const res = await apiFetch('/api/invoices', {
-      method: 'POST', headers: jsonHeaders(), body: JSON.stringify(body),
-    })
-    if (!res.ok) throw new Error(await readError(res, 'Failed to create invoice'))
-    const data = await res.json()
-    await fetchInvoices()
-    return data
+    try {
+      const res = await apiFetch('/api/invoices', {
+        method: 'POST', headers: jsonHeaders(), body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error(await readError(res, 'Failed to create invoice'))
+      const data = await res.json()
+      await fetchInvoices()
+      return data
+    } catch (e) {
+      if (!navigator.onLine || e instanceof TypeError) {
+        await useMutationStore().enqueue({ method: 'POST', path: '/api/invoices', body, entity: 'invoice', entityId: body.id })
+        return { id: body.id, queued: true }
+      }
+      throw e
+    }
   }
 
   async function updateInvoice(id, payload) {
@@ -96,13 +105,21 @@ export const useSalesStore = defineStore('sales', () => {
   async function pay(payload) {
     const body = { ...payload }
     if (!body.id) body.id = crypto.randomUUID() // idempotency key for offline replay/retry
-    const res = await apiFetch('/api/payments', {
-      method: 'POST', headers: jsonHeaders(), body: JSON.stringify(body),
-    })
-    if (!res.ok) throw new Error(await readError(res, 'Failed to register payment'))
-    await fetchInvoice(payload.invoiceId)
-    await fetchInvoices()
-    return res.json()
+    try {
+      const res = await apiFetch('/api/payments', {
+        method: 'POST', headers: jsonHeaders(), body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error(await readError(res, 'Failed to register payment'))
+      await fetchInvoice(payload.invoiceId)
+      await fetchInvoices()
+      return res.json()
+    } catch (e) {
+      if (!navigator.onLine || e instanceof TypeError) {
+        await useMutationStore().enqueue({ method: 'POST', path: '/api/payments', body, entity: 'payment', entityId: body.id })
+        return { id: body.id, queued: true }
+      }
+      throw e
+    }
   }
 
   return {

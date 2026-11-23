@@ -59,6 +59,23 @@ export async function apiFetch(path, options = {}) {
   return res
 }
 
+// A UNIQUE conflict on the client-supplied id/sku is an idempotent replay, not
+// a business conflict. Other 409s (duplicate reference, stale version) stay
+// visible with their original message.
+export async function readConflictResponse(res) {
+  if (res.status !== 409) return null
+  const text = await res.text().catch(() => '')
+  let error = text
+  try {
+    const d = JSON.parse(text)
+    error = d?.error || d?.message || text
+  } catch { /* plain text */ }
+  return {
+    text, error,
+    duplicate: /UNIQUE[^\n]*\.(id|sku)\b|duplicate[^\n]*\b(id|sku)\b/i.test(text),
+  }
+}
+
 export async function apiJson(path, options = {}) {
   const res = await apiFetch(path, options)
   if (!res.ok) throw new Error(await readError(res, `Request failed (${res.status})`))

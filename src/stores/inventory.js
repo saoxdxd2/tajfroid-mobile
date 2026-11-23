@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { apiFetch, jsonHeaders, readError } from '../lib/api'
+import { apiFetch, readConflictResponse, jsonHeaders, readError } from '../lib/api'
 import { useMutationStore } from './mutations'
 
 export const useInventoryStore = defineStore('inventory', () => {
@@ -57,9 +57,13 @@ export const useInventoryStore = defineStore('inventory', () => {
         headers: jsonHeaders(),
         body: JSON.stringify(body),
       })
+      const conflict = await readConflictResponse(res)
+      if (conflict?.duplicate) {
+        await fetchProducts()
+        return { sku: body.sku, idempotent: true }
+      }
       if (!res.ok) {
-        const d = await res.json().catch(() => ({}))
-        throw new Error(d.error || 'Failed to create product')
+        throw new Error(conflict?.error || 'Failed to create product')
       }
     } catch (e) {
       if (!navigator.onLine || e instanceof TypeError) {

@@ -22,7 +22,8 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	for _, row := range res.Rows {
 		items = append(items, map[string]interface{}{
 			"id": row[0], "name": row[1], "pairedAt": row[2],
-			"revokedAt": row[3], "createdAt": row[4],
+			"revokedAt": row[3], "baseRevokedAt": lib.ToInt64(row[3]),
+			"createdAt": row[4],
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")

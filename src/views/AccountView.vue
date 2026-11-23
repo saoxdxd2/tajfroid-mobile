@@ -25,9 +25,10 @@
 import { computed, onMounted, ref } from 'vue'
 import { useDeviceStore } from '../stores/device'
 import { useMutationStore } from '../stores/mutations'
-import { apiFetch, readError } from '../lib/api'
+import { apiFetch, jsonHeaders, readError } from '../lib/api'
 
 const store = useDeviceStore()
+const mutations = useMutationStore()
 const paired = computed(() => !!store.deviceToken)
 const relayUrl = computed(() => store.relayUrl)
 const currentDeviceId = computed(() => store.deviceId)
@@ -50,18 +51,26 @@ async function loadDevices() {
 async function revoke(id) {
   if (!confirm('Revoke this device? It will need to pair again.')) return
   const path = `/api/devices/manage?id=${encodeURIComponent(id)}`
+  const found = devices.value.find(d => d.id === id)
+  const base = Number(found?.baseRevokedAt || found?.revokedAt || 0)
+  const body = { baseRevokedAt: base }
   try {
-    const res = await apiFetch(path, { method: 'DELETE' })
+    const res = await apiFetch(path, {
+      method: 'DELETE', headers: jsonHeaders(), body: JSON.stringify(body),
+    })
     if (res.status === 409) {
-      const d = await res.json().catch(()=>({}))
-      await useMutationStore().recordConflict({ method:'DELETE', path, body:null, entity:'device', entityId:id, conflict:d, error:d.error })
-      throw new Error(d.error || 'Conflict')
+      await mutations.conflictFromResponse(res, {
+        method: 'DELETE', path, body, entity: 'device', entityId: id,
+        baseUpdatedAt: base, fallback: 'Conflict: device changed',
+      })
     }
     if (!res.ok) throw new Error(await readError(res, 'Failed to revoke'))
     await loadDevices()
   } catch (e) {
     if (!e.conflict && (!navigator.onLine || e instanceof TypeError)) {
-      await useMutationStore().enqueue({ method:'DELETE', path, body:null, entity:'device', entityId:id })
+      await mutations.enqueue({
+        method: 'DELETE', path, body, entity: 'device', entityId: id, baseUpdatedAt: base,
+      })
       error.value = 'Offline: revoke queued'
       return
     }

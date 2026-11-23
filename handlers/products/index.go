@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"tajfroid-mobile/lib"
@@ -57,6 +58,12 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "sku and name required", http.StatusBadRequest)
 			return
 		}
+		if ex, err := db.Execute("SELECT sku, name FROM catalog WHERE sku=?", lib.Text(body.SKU)); err == nil && len(ex.Rows) > 0 {
+			lib.WriteJSON(w, http.StatusOK, map[string]interface{}{
+				"sku": ex.Rows[0][0], "name": ex.Rows[0][1], "idempotent": true,
+			})
+			return
+		}
 		if body.SalePrice == "" {
 			body.SalePrice = "0"
 		}
@@ -77,6 +84,12 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			lib.Int(int64(body.Stock)), lib.Int(int64(active)),
 			nullableText(body.Category), nullableText(body.Brand))
 		if err != nil {
+			if strings.Contains(err.Error(), "UNIQUE") {
+				lib.WriteJSON(w, http.StatusConflict, map[string]interface{}{
+					"error": err.Error(), "sku": body.SKU, "idempotent": true,
+				})
+				return
+			}
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

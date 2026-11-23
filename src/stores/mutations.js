@@ -5,6 +5,10 @@ import { apiFetch, readError } from '../lib/api'
 const DB_NAME = 'tajfroid-mutation-queue'
 const DB_VERSION = 1
 const STORE = 'mutations'
+// Applied rows are kept only as a local replay guard. The server is already
+// idempotent by client id, so pruning old rows cannot duplicate data.
+const MAX_APPLIED = 200
+const APPLIED_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -65,6 +69,22 @@ export const useMutationStore = defineStore('mutations', () => {
     // Replay-safe ordered processing: sequential by seq (assigned on enqueue/recordConflict).
     all.sort((a, b) => (a.seq || 0) - (b.seq || 0))
     items.value = all
+    await pruneApplied()
+  }
+
+  async function pruneApplied() {
+    const now = Date.now()
+    const applied = items.value
+      .filter(x => x.status === 'applied')
+      .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))
+    const stale = new Set()
+    applied.forEach((x, i) => {
+      const age = now - (x.updatedAt || x.createdAt || 0)
+      if (i >= MAX_APPLIED || age > APPLIED_TTL_MS) stale.add(x.id)
+    })
+    if (!stale.size) return
+    for (const id of stale) await idbDel(id)
+    items.value = items.value.filter(x => !stale.has(x.id))
   }
 
   async function enqueue({ method, path, body, entity, entityId, baseUpdatedAt, idempotencyKey }) {
@@ -132,6 +152,7 @@ export const useMutationStore = defineStore('mutations', () => {
           if (!navigator.onLine) break
         }
       }
+      await pruneApplied()
     } finally {
       syncing.value = false
     }

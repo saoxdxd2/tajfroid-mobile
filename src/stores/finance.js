@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { apiFetch, readError, jsonHeaders } from '../lib/api'
+import { apiFetch, readConflictResponse, readError, jsonHeaders } from '../lib/api'
 import { useMutationStore } from './mutations'
 
 
@@ -98,7 +98,12 @@ export const useFinanceStore = defineStore('finance', () => {
       const res = await apiFetch('/api/expenses', {
         method: 'POST', headers: jsonHeaders(), body: JSON.stringify(body),
       })
-      if (!res.ok) throw new Error(await readError(res, 'Failed to create expense'))
+      const conflict = await readConflictResponse(res)
+      if (conflict?.duplicate) {
+        await fetchExpenses(); await fetchSummary()
+        return { id: body.id, idempotent: true }
+      }
+      if (!res.ok) throw new Error(conflict?.error || await readError(res, 'Failed to create expense'))
       await fetchExpenses()
       await fetchSummary()
       return res.json()

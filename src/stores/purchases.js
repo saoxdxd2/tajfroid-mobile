@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { apiFetch, readError, jsonHeaders } from '../lib/api'
+import { apiFetch, readConflictResponse, readError, jsonHeaders } from '../lib/api'
 import { useMutationStore } from './mutations'
 
 
@@ -48,7 +48,12 @@ export const usePurchaseStore = defineStore('purchases', () => {
       const res = await apiFetch('/api/purchases', {
         method: 'POST', headers: jsonHeaders(), body: JSON.stringify(body),
       })
-      if (!res.ok) throw new Error(await readError(res, 'Failed to create purchase'))
+      const conflict = await readConflictResponse(res)
+      if (conflict?.duplicate) {
+        await fetchAll()
+        return { id: body.id, idempotent: true }
+      }
+      if (!res.ok) throw new Error(conflict?.error || await readError(res, 'Failed to create purchase'))
       const data = await res.json()
       await fetchAll()
       return data

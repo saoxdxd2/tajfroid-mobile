@@ -70,7 +70,8 @@ const server = reactive({})
 const conflictObj = reactive({})
 const mergeSel = reactive({})
 const serverPaste = reactive({})
-const items = computed(() => store.items)
+// Applied rows stay in IndexedDB as replay guards; only show work needing action.
+const items = computed(() => store.items.filter(i => i.status !== 'applied'))
 const syncing = computed(() => store.syncing)
 const pending = computed(() => items.value.filter(i => i.status === 'pending').length)
 const conflicts = computed(() => items.value.filter(i => i.status === 'conflict').length)
@@ -109,7 +110,7 @@ function readPathFor(m) {
     brand: `/api/brands/manage?id=${id}`,
     expense: `/api/expenses/manage?id=${id}`,
     stock: `/api/stock?sku=${id}`,
-    check: `/api/checks/manage?id=${id}`,
+    device: `/api/devices/manage?id=${id}`,
   }
   return map[m.entity] || null
 }

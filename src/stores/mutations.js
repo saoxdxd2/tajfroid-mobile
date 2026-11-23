@@ -98,8 +98,9 @@ export const useMutationStore = defineStore('mutations', () => {
             body: payload ? JSON.stringify(payload) : undefined,
           })
           if (res.status === 409) {
-            const msg = await readError(res, 'Conflict')
-            const next = { ...item, status: 'conflict', lastError: msg, attempts: (item.attempts||0)+1, updatedAt: Date.now() }
+            const body409 = await res.json().catch(() => ({}))
+            const msg = body409.error || 'Conflict'
+            const next = { ...item, status: 'conflict', lastError: msg, conflict: body409, attempts: (item.attempts||0)+1, updatedAt: Date.now() }
             await idbPut(next); replace(next)
             lastError.value = msg
             continue

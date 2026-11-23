@@ -14,6 +14,7 @@
         </div>
         <div class="path">{{ m.path }}</div>
         <div v-if="m.lastError" class="err">{{ m.lastError }}</div>
+        <div v-if="m.conflict" class="conflict-box"><strong>Server conflict:</strong> <pre>{{ pretty(m.conflict) }}</pre></div>
         <details v-if="m.body" class="payload"><summary>Payload / merge</summary>
           <div v-if="isFlat(m.body)" class="fields">
             <label v-for="(v,k) in m.body" :key="k" class="field">
@@ -80,6 +81,8 @@ async function savePayload(id) {
 .badge { background: #8a6d00; color: #fff; padding: 1px 6px; border-radius: 10px; font-size: 11px; }
 .path { color: #555; word-break: break-all; }
 .err { color: #7a1a00; margin: 4px 0; white-space: pre-wrap; }
+.conflict-box { background: #fff3f3; border: 1px solid #f2c2c2; padding: 4px; margin: 4px 0; font-size: 11px; }
+.conflict-box pre { margin: 2px 0 0; white-space: pre-wrap; }
 .payload pre { max-height: 120px; overflow: auto; background: #fff; padding: 4px; margin: 4px 0; font-size: 11px; }
 .edit { width: 100%; font-family: monospace; font-size: 11px; margin: 4px 0; }
 .fields { display: grid; gap: 4px; margin: 4px 0; }

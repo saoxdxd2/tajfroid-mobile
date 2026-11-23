@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -447,5 +448,57 @@ func TestSyncE2ERelayOfflineConflictInvariants(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), rawToken) {
 		t.Error("raw bearer token appeared in the standard logger output")
+	}
+}
+
+func TestSyncE2EStdoutRequestLogHasNoSecrets(t *testing.T) {
+	const (
+		rawToken   = "sync-e2e-stdout-bearer-2b8d4f6a"
+		tursoToken = "sync-e2e-stdout-turso-secret"
+	)
+	mock := &syncE2ETursoMock{
+		tokenHash: lib.Sha256Hex(rawToken),
+		deviceID:  "sync-e2e-stdout-device",
+		customers: make(map[string]*syncE2ECustomerRow),
+	}
+	srv := httptest.NewServer(mock)
+	defer srv.Close()
+	t.Setenv("TURSO_DATABASE_URL", srv.URL)
+	t.Setenv("TURSO_AUTH_TOKEN", tursoToken)
+	if tr, ok := lib.NewTurso().HTTP.Transport.(*http.Transport); ok {
+		defer tr.CloseIdleConnections()
+	}
+
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	prevStdout := os.Stdout
+	os.Stdout = writer
+	defer func() {
+		os.Stdout = prevStdout
+		reader.Close()
+	}()
+
+	res := syncE2ECall(t, mock, http.MethodGet, "/api/customers", nil, rawToken, 1)
+	writer.Close()
+	os.Stdout = prevStdout
+	out, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if res.status != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", res.status, res.body)
+	}
+	line := string(out)
+	if strings.Contains(line, rawToken) || strings.Contains(line, tursoToken) {
+		t.Errorf("stdout request log leaked a secret: %s", line)
+	}
+	if !strings.Contains(line, `"auth_kind":"device"`) {
+		t.Errorf("stdout request log missing auth kind: %s", line)
+	}
+	if !strings.Contains(line, `"error_category"`) && !strings.Contains(line, `"status":200`) {
+		t.Errorf("unexpected stdout request log: %s", line)
 	}
 }

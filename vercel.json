@@ -4,6 +4,13 @@
   "installCommand": "npm install --include=dev",
   "framework": "vite",
   "rewrites": [
+    { "source": "/api/products/manage", "destination": "/api/products-manage" },
+    { "source": "/api/categories/manage", "destination": "/api/categories-manage" },
+    { "source": "/api/brands/manage", "destination": "/api/brands-manage" },
+    { "source": "/api/customers/manage", "destination": "/api/customers-manage" },
+    { "source": "/api/suppliers/manage", "destination": "/api/suppliers-manage" },
+    { "source": "/api/invoices/manage", "destination": "/api/invoices-manage" },
+    { "source": "/api/invoices/items", "destination": "/api/invoices-items" },
     { "source": "/api/agent/scans/([^/]+)/status", "destination": "/api/agent/scan_status?id=$1" },
     { "source": "/api/agent/scans/([^/]+)/file", "destination": "/api/agent/scan_file?id=$1" },
     { "source": "/((?!api/)[^.]*)", "destination": "/index.html" }

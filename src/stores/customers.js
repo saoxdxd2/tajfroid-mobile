@@ -1,11 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-
-function base() { return localStorage.getItem('relayUrl') || '' }
-function authHeaders() {
-  const token = localStorage.getItem('deviceToken') || ''
-  return token ? { Authorization: `Bearer ${token}` } : {}
-}
+import { apiFetch, jsonHeaders, readError } from '../lib/api'
 
 export const useCustomerStore = defineStore('customers', () => {
   const customers = ref([])
@@ -16,7 +11,7 @@ export const useCustomerStore = defineStore('customers', () => {
     loading.value = true
     error.value = ''
     try {
-      const res = await fetch(`${base()}/api/customers`, { headers: authHeaders() })
+      const res = await apiFetch('/api/customers')
       if (!res.ok) throw new Error('Failed to fetch customers')
       const data = await res.json()
       customers.value = data.customers || []
@@ -28,22 +23,21 @@ export const useCustomerStore = defineStore('customers', () => {
   }
 
   async function create(customer) {
-    const res = await fetch(`${base()}/api/customers`, {
+    const res = await apiFetch('/api/customers', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      headers: jsonHeaders(),
       body: JSON.stringify(customer),
     })
     if (!res.ok) {
-      const d = await res.json().catch(() => ({}))
-      throw new Error(d.error || 'Failed to create customer')
+      throw new Error(await readError(res, 'Failed to create customer'))
     }
     await fetchAll()
   }
 
   async function update(id, updates) {
-    const res = await fetch(`${base()}/api/customers/manage?id=${encodeURIComponent(id)}`, {
+    const res = await apiFetch(`/api/customers/manage?id=${encodeURIComponent(id)}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      headers: jsonHeaders(),
       body: JSON.stringify(updates),
     })
     if (!res.ok) throw new Error('Failed to update customer')
@@ -51,10 +45,7 @@ export const useCustomerStore = defineStore('customers', () => {
   }
 
   async function archive(id) {
-    const res = await fetch(`${base()}/api/customers/manage?id=${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-      headers: authHeaders(),
-    })
+    const res = await apiFetch(`/api/customers/manage?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
     if (!res.ok) throw new Error('Failed to archive customer')
     await fetchAll()
   }

@@ -1,11 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-
-function base() { return localStorage.getItem('relayUrl') || '' }
-function authHeaders() {
-  const token = localStorage.getItem('deviceToken') || ''
-  return token ? { Authorization: `Bearer ${token}` } : {}
-}
+import { apiFetch, jsonHeaders, readError } from '../lib/api'
 
 export const useSupplierStore = defineStore('suppliers', () => {
   const suppliers = ref([])
@@ -16,7 +11,7 @@ export const useSupplierStore = defineStore('suppliers', () => {
     loading.value = true
     error.value = ''
     try {
-      const res = await fetch(`${base()}/api/suppliers`, { headers: authHeaders() })
+      const res = await apiFetch('/api/suppliers')
       if (!res.ok) throw new Error('Failed to fetch suppliers')
       const data = await res.json()
       suppliers.value = data.suppliers || []
@@ -28,22 +23,21 @@ export const useSupplierStore = defineStore('suppliers', () => {
   }
 
   async function create(supplier) {
-    const res = await fetch(`${base()}/api/suppliers`, {
+    const res = await apiFetch('/api/suppliers', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      headers: jsonHeaders(),
       body: JSON.stringify(supplier),
     })
     if (!res.ok) {
-      const d = await res.json().catch(() => ({}))
-      throw new Error(d.error || 'Failed to create supplier')
+      throw new Error(await readError(res, 'Failed to create supplier'))
     }
     await fetchAll()
   }
 
   async function update(id, updates) {
-    const res = await fetch(`${base()}/api/suppliers/manage?id=${encodeURIComponent(id)}`, {
+    const res = await apiFetch(`/api/suppliers/manage?id=${encodeURIComponent(id)}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      headers: jsonHeaders(),
       body: JSON.stringify(updates),
     })
     if (!res.ok) throw new Error('Failed to update supplier')
@@ -51,10 +45,7 @@ export const useSupplierStore = defineStore('suppliers', () => {
   }
 
   async function archive(id) {
-    const res = await fetch(`${base()}/api/suppliers/manage?id=${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-      headers: authHeaders(),
-    })
+    const res = await apiFetch(`/api/suppliers/manage?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
     if (!res.ok) throw new Error('Failed to archive supplier')
     await fetchAll()
   }

@@ -1,19 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-
-function base() { return localStorage.getItem('relayUrl') || '' }
-function authHeaders() {
-  const token = localStorage.getItem('deviceToken') || ''
-  return token ? { Authorization: `Bearer ${token}` } : {}
-}
-function jsonHeaders() {
-  return { 'Content-Type': 'application/json', ...authHeaders() }
-}
-
-async function readError(res, fallback) {
-  const text = await res.text().catch(() => '')
-  return text || fallback
-}
+import { apiFetch, jsonHeaders, readError } from '../lib/api' 
 
 export const useSalesStore = defineStore('sales', () => {
   const invoices = ref([])
@@ -25,8 +12,8 @@ export const useSalesStore = defineStore('sales', () => {
     loading.value = true
     error.value = ''
     try {
-      const url = `${base()}/api/invoices${includeArchived ? '?archived=1' : ''}`
-      const res = await fetch(url, { headers: authHeaders() })
+      const url = `/api/invoices${includeArchived ? '?archived=1' : ''}`
+      const res = await apiFetch(url)
       if (!res.ok) throw new Error(await readError(res, 'Failed to fetch invoices'))
       const data = await res.json()
       invoices.value = data.invoices || []
@@ -41,7 +28,7 @@ export const useSalesStore = defineStore('sales', () => {
     loading.value = true
     error.value = ''
     try {
-      const res = await fetch(`${base()}/api/invoices/manage?id=${encodeURIComponent(id)}`, { headers: authHeaders() })
+      const res = await apiFetch(`/api/invoices/manage?id=${encodeURIComponent(id)}`)
       if (!res.ok) throw new Error(await readError(res, 'Failed to load invoice'))
       current.value = await res.json()
       return current.value
@@ -54,7 +41,7 @@ export const useSalesStore = defineStore('sales', () => {
   }
 
   async function createInvoice(payload) {
-    const res = await fetch(`${base()}/api/invoices`, {
+    const res = await apiFetch('/api/invoices', {
       method: 'POST', headers: jsonHeaders(), body: JSON.stringify(payload),
     })
     if (!res.ok) throw new Error(await readError(res, 'Failed to create invoice'))
@@ -64,7 +51,7 @@ export const useSalesStore = defineStore('sales', () => {
   }
 
   async function updateInvoice(id, payload) {
-    const res = await fetch(`${base()}/api/invoices/manage?id=${encodeURIComponent(id)}`, {
+    const res = await apiFetch(`/api/invoices/manage?id=${encodeURIComponent(id)}`, {
       method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(payload),
     })
     if (!res.ok) throw new Error(await readError(res, 'Failed to update invoice'))
@@ -72,7 +59,7 @@ export const useSalesStore = defineStore('sales', () => {
   }
 
   async function action(id, name) {
-    const res = await fetch(`${base()}/api/invoices/manage?id=${encodeURIComponent(id)}`, {
+    const res = await apiFetch(`/api/invoices/manage?id=${encodeURIComponent(id)}`, {
       method: 'PUT', headers: jsonHeaders(), body: JSON.stringify({ action: name }),
     })
     if (!res.ok) throw new Error(await readError(res, `Failed to ${name} invoice`))
@@ -81,15 +68,13 @@ export const useSalesStore = defineStore('sales', () => {
   }
 
   async function archive(id) {
-    const res = await fetch(`${base()}/api/invoices/manage?id=${encodeURIComponent(id)}`, {
-      method: 'DELETE', headers: authHeaders(),
-    })
+    const res = await apiFetch(`/api/invoices/manage?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
     if (!res.ok) throw new Error(await readError(res, 'Failed to archive invoice'))
     await fetchInvoices()
   }
 
   async function addItem(invoiceId, item) {
-    const res = await fetch(`${base()}/api/invoices/items`, {
+    const res = await apiFetch('/api/invoices/items', {
       method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ invoiceId, ...item }),
     })
     if (!res.ok) throw new Error(await readError(res, 'Failed to add item'))
@@ -99,16 +84,14 @@ export const useSalesStore = defineStore('sales', () => {
   }
 
   async function removeItem(invoiceId, itemId) {
-    const res = await fetch(`${base()}/api/invoices/items?id=${encodeURIComponent(itemId)}`, {
-      method: 'DELETE', headers: authHeaders(),
-    })
+    const res = await apiFetch(`/api/invoices/items?id=${encodeURIComponent(itemId)}`, { method: 'DELETE' })
     if (!res.ok) throw new Error(await readError(res, 'Failed to remove item'))
     await fetchInvoice(invoiceId)
     await fetchInvoices()
   }
 
   async function pay(payload) {
-    const res = await fetch(`${base()}/api/payments`, {
+    const res = await apiFetch('/api/payments', {
       method: 'POST', headers: jsonHeaders(), body: JSON.stringify(payload),
     })
     if (!res.ok) throw new Error(await readError(res, 'Failed to register payment'))

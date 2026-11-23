@@ -57,6 +57,8 @@ CREATE TABLE IF NOT EXISTS scans (
   blob_key TEXT,
   size_bytes INTEGER,
   sha256 TEXT,
+  ciphertext_b64 TEXT,
+  content_type TEXT,
   purchase_reference TEXT,
   message TEXT,
   created_at INTEGER NOT NULL,

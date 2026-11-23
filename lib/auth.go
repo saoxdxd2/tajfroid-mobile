@@ -11,43 +11,47 @@ var (
 	ErrInvalidToken = errors.New("invalid or revoked token")
 )
 
+type Identity struct {
+	Kind string
+	ID   string
+}
+
 // Authenticate accepts either a paired phone device token or a desktop agent
 // token. Both are stored as SHA-256 hashes, never in clear text.
-func Authenticate(r *http.Request) error {
+func Authenticate(r *http.Request) (Identity, error) {
 	header := strings.TrimSpace(r.Header.Get("Authorization"))
 	if header == "" {
-		return ErrMissingToken
+		return Identity{}, ErrMissingToken
 	}
 	const prefix = "Bearer "
 	if len(header) <= len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
-		return ErrMissingToken
+		return Identity{}, ErrMissingToken
 	}
 	token := strings.TrimSpace(header[len(prefix):])
 	if token == "" {
-		return ErrMissingToken
+		return Identity{}, ErrMissingToken
 	}
 	hash := Sha256Hex(token)
 	db := NewTurso()
 	res, err := db.Execute(
-		`SELECT kind FROM (
-			SELECT 'agent' AS kind FROM agent_tokens WHERE token_hash = ?
-			UNION ALL
-			SELECT 'device' AS kind FROM devices WHERE device_token_hash = ? AND revoked_at IS NULL
-		) LIMIT 1`,
+		`SELECT 'agent', id FROM agent_tokens WHERE token_hash = ?
+		 UNION ALL
+		 SELECT 'device', id FROM devices WHERE device_token_hash = ? AND revoked_at IS NULL
+		 LIMIT 1`,
 		Text(hash), Text(hash))
 	if err != nil {
-		return err
+		return Identity{}, err
 	}
 	if len(res.Rows) == 0 {
-		return ErrInvalidToken
+		return Identity{}, ErrInvalidToken
 	}
-	return nil
+	return Identity{Kind: ToString(res.Rows[0][0]), ID: ToString(res.Rows[0][1])}, nil
 }
 
 // RequireAuth writes the proper status code and returns false when the caller
 // must not proceed.
 func RequireAuth(w http.ResponseWriter, r *http.Request) bool {
-	err := Authenticate(r)
+	_, err := Authenticate(r)
 	if err == nil {
 		return true
 	}

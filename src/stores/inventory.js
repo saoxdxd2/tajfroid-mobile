@@ -1,15 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-
-const BASE = () => {
-  // Will be set by the app
-  return localStorage.getItem('relayUrl') || ''
-}
-
-function authHeaders() {
-  const token = localStorage.getItem('deviceToken') || ''
-  return token ? { Authorization: `Bearer ${token}` } : {}
-}
+import { apiFetch, jsonHeaders, readError } from '../lib/api'
 
 export const useInventoryStore = defineStore('inventory', () => {
   const products = ref([])
@@ -22,8 +13,8 @@ export const useInventoryStore = defineStore('inventory', () => {
     loading.value = true
     error.value = ''
     try {
-      const res = await fetch(`${BASE()}/api/products`, { headers: authHeaders() })
-      if (!res.ok) throw new Error('Failed to fetch products')
+      const res = await apiFetch('/api/products')
+      if (!res.ok) throw new Error(await readError(res, 'Failed to fetch products'))
       const data = await res.json()
       products.value = data.products || []
     } catch (e) {
@@ -35,7 +26,7 @@ export const useInventoryStore = defineStore('inventory', () => {
 
   async function fetchCategories() {
     try {
-      const res = await fetch(`${BASE()}/api/categories`, { headers: authHeaders() })
+      const res = await apiFetch('/api/categories')
       if (!res.ok) throw new Error('Failed to fetch categories')
       const data = await res.json()
       categories.value = data.categories || []
@@ -46,7 +37,7 @@ export const useInventoryStore = defineStore('inventory', () => {
 
   async function fetchBrands() {
     try {
-      const res = await fetch(`${BASE()}/api/brands`, { headers: authHeaders() })
+      const res = await apiFetch('/api/brands')
       if (!res.ok) throw new Error('Failed to fetch brands')
       const data = await res.json()
       brands.value = data.brands || []
@@ -56,10 +47,10 @@ export const useInventoryStore = defineStore('inventory', () => {
   }
 
   async function createProduct(product) {
-    const res = await fetch(`${BASE()}/api/products`, {
+    const res = await apiFetch('/api/products', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(product),
+      headers: jsonHeaders(),
+      body: JSON.stringify(payload),
     })
     if (!res.ok) {
       const d = await res.json().catch(() => ({}))
@@ -69,10 +60,10 @@ export const useInventoryStore = defineStore('inventory', () => {
   }
 
   async function updateProduct(sku, updates) {
-    const res = await fetch(`${BASE()}/api/products/manage?sku=${encodeURIComponent(sku)}`, {
+    const res = await apiFetch(`/api/products/manage?sku=${encodeURIComponent(sku)}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(updates),
+      headers: jsonHeaders(),
+      body: JSON.stringify(payload),
     })
     if (!res.ok) {
       const d = await res.json().catch(() => ({}))
@@ -82,18 +73,15 @@ export const useInventoryStore = defineStore('inventory', () => {
   }
 
   async function deleteProduct(sku) {
-    const res = await fetch(`${BASE()}/api/products/manage?sku=${encodeURIComponent(sku)}`, {
-      method: 'DELETE',
-      headers: authHeaders(),
-    })
+    const res = await apiFetch(`/api/products/manage?sku=${encodeURIComponent(sku)}`, { method: 'DELETE' })
     if (!res.ok) throw new Error('Failed to archive product')
     await fetchProducts()
   }
 
   async function createCategory(name) {
-    const res = await fetch(`${BASE()}/api/categories`, {
+    const res = await apiFetch('/api/categories', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      headers: jsonHeaders(),
       body: JSON.stringify({ name }),
     })
     if (!res.ok) throw new Error('Failed to create category')
@@ -101,18 +89,15 @@ export const useInventoryStore = defineStore('inventory', () => {
   }
 
   async function deleteCategory(id) {
-    const res = await fetch(`${BASE()}/api/categories/manage?id=${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-      headers: authHeaders(),
-    })
+    const res = await apiFetch(`/api/categories/manage?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
     if (!res.ok) throw new Error('Failed to delete category')
     await fetchCategories()
   }
 
   async function createBrand(name) {
-    const res = await fetch(`${BASE()}/api/brands`, {
+    const res = await apiFetch('/api/brands', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      headers: jsonHeaders(),
       body: JSON.stringify({ name }),
     })
     if (!res.ok) throw new Error('Failed to create brand')
@@ -120,19 +105,16 @@ export const useInventoryStore = defineStore('inventory', () => {
   }
 
   async function deleteBrand(id) {
-    const res = await fetch(`${BASE()}/api/brands/manage?id=${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-      headers: authHeaders(),
-    })
+    const res = await apiFetch(`/api/brands/manage?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
     if (!res.ok) throw new Error('Failed to delete brand')
     await fetchBrands()
   }
 
   async function adjustStock(sku, change) {
-    const res = await fetch(`${BASE()}/api/stock`, {
+    const res = await apiFetch('/api/stock', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ sku, change }),
+      headers: jsonHeaders(),
+      body: JSON.stringify({ sku, delta }),
     })
     if (!res.ok) {
       const d = await res.json().catch(() => ({}))

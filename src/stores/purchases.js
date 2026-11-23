@@ -1,18 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { apiFetch, readError, jsonHeaders } from '../lib/api'
 
-function base() { return localStorage.getItem('relayUrl') || '' }
-function authHeaders() {
-  const token = localStorage.getItem('deviceToken') || ''
-  return token ? { Authorization: `Bearer ${token}` } : {}
-}
-function jsonHeaders() {
-  return { 'Content-Type': 'application/json', ...authHeaders() }
-}
-async function readError(res, fallback) {
-  const text = await res.text().catch(() => '')
-  return text || fallback
-}
 
 export const usePurchaseStore = defineStore('purchases', () => {
   const purchases = ref([])
@@ -24,7 +13,7 @@ export const usePurchaseStore = defineStore('purchases', () => {
     loading.value = true
     error.value = ''
     try {
-      const res = await fetch(`${base()}/api/purchases`, { headers: authHeaders() })
+      const res = await apiFetch('/api/purchases')
       if (!res.ok) throw new Error(await readError(res, 'Failed to fetch purchases'))
       const data = await res.json()
       purchases.value = data.purchases || []
@@ -39,7 +28,7 @@ export const usePurchaseStore = defineStore('purchases', () => {
     loading.value = true
     error.value = ''
     try {
-      const res = await fetch(`${base()}/api/purchases/manage?id=${encodeURIComponent(id)}`, { headers: authHeaders() })
+      const res = await apiFetch(`/api/purchases/manage?id=${encodeURIComponent(id)}`)
       if (!res.ok) throw new Error(await readError(res, 'Failed to load purchase'))
       current.value = await res.json()
       return current.value
@@ -52,7 +41,7 @@ export const usePurchaseStore = defineStore('purchases', () => {
   }
 
   async function create(payload) {
-    const res = await fetch(`${base()}/api/purchases`, {
+    const res = await apiFetch('/api/purchases', {
       method: 'POST', headers: jsonHeaders(), body: JSON.stringify(payload),
     })
     if (!res.ok) throw new Error(await readError(res, 'Failed to create purchase'))
@@ -62,7 +51,7 @@ export const usePurchaseStore = defineStore('purchases', () => {
   }
 
   async function update(id, payload) {
-    const res = await fetch(`${base()}/api/purchases/manage?id=${encodeURIComponent(id)}`, {
+    const res = await apiFetch(`/api/purchases/manage?id=${encodeURIComponent(id)}`, {
       method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(payload),
     })
     if (!res.ok) throw new Error(await readError(res, 'Failed to update purchase'))
@@ -76,7 +65,7 @@ export const usePurchaseStore = defineStore('purchases', () => {
   }
 
   async function remove(id) {
-    const res = await fetch(`${base()}/api/purchases/manage?id=${encodeURIComponent(id)}`, {
+    const res = await apiFetch(`/api/purchases/manage?id=${encodeURIComponent(id)}`, {
       method: 'DELETE', headers: authHeaders(),
     })
     if (!res.ok) throw new Error(await readError(res, 'Failed to delete purchase'))
@@ -84,7 +73,7 @@ export const usePurchaseStore = defineStore('purchases', () => {
   }
 
   async function addItem(purchaseId, item) {
-    const res = await fetch(`${base()}/api/purchases/items`, {
+    const res = await apiFetch('/api/purchases/items', {
       method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ purchaseId, ...item }),
     })
     if (!res.ok) throw new Error(await readError(res, 'Failed to add item'))
@@ -94,7 +83,7 @@ export const usePurchaseStore = defineStore('purchases', () => {
   }
 
   async function removeItem(purchaseId, itemId) {
-    const res = await fetch(`${base()}/api/purchases/items?id=${encodeURIComponent(itemId)}`, {
+    const res = await apiFetch(`/api/purchases/items?id=${encodeURIComponent(itemId)}`, {
       method: 'DELETE', headers: authHeaders(),
     })
     if (!res.ok) throw new Error(await readError(res, 'Failed to remove item'))

@@ -1,18 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { apiFetch, readError, jsonHeaders } from '../lib/api'
 
-function base() { return localStorage.getItem('relayUrl') || '' }
-function authHeaders() {
-  const token = localStorage.getItem('deviceToken') || ''
-  return token ? { Authorization: `Bearer ${token}` } : {}
-}
-function jsonHeaders() {
-  return { 'Content-Type': 'application/json', ...authHeaders() }
-}
-async function readError(res, fallback) {
-  const text = await res.text().catch(() => '')
-  return text || fallback
-}
 
 export const useFinanceStore = defineStore('finance', () => {
   const summary = ref(null)
@@ -29,7 +18,7 @@ export const useFinanceStore = defineStore('finance', () => {
       const params = new URLSearchParams()
       if (start) params.set('start', start)
       if (end) params.set('end', end)
-      const res = await fetch(`${base()}/api/finance?${params}`, { headers: authHeaders() })
+      const res = await apiFetch(`/api/finance?${params}`)
       if (!res.ok) throw new Error(await readError(res, 'Failed to load finance summary'))
       summary.value = await res.json()
     } catch (e) {
@@ -42,7 +31,7 @@ export const useFinanceStore = defineStore('finance', () => {
   async function fetchChecks(status = '') {
     try {
       const qs = status ? `?status=${encodeURIComponent(status)}` : ''
-      const res = await fetch(`${base()}/api/checks${qs}`, { headers: authHeaders() })
+      const res = await apiFetch(`/api/checks${qs}`)
       if (!res.ok) throw new Error(await readError(res, 'Failed to load checks'))
       const data = await res.json()
       checks.value = data.checks || []
@@ -52,7 +41,7 @@ export const useFinanceStore = defineStore('finance', () => {
   }
 
   async function createCheck(payload) {
-    const res = await fetch(`${base()}/api/checks`, {
+    const res = await apiFetch('/api/checks', {
       method: 'POST', headers: jsonHeaders(), body: JSON.stringify(payload),
     })
     if (!res.ok) throw new Error(await readError(res, 'Failed to create check'))
@@ -61,7 +50,7 @@ export const useFinanceStore = defineStore('finance', () => {
   }
 
   async function setCheckStatus(id, status) {
-    const res = await fetch(`${base()}/api/checks/manage?id=${encodeURIComponent(id)}`, {
+    const res = await apiFetch(`/api/checks/manage?id=${encodeURIComponent(id)}`, {
       method: 'PUT', headers: jsonHeaders(), body: JSON.stringify({ status }),
     })
     if (!res.ok) throw new Error(await readError(res, 'Failed to update check'))
@@ -71,7 +60,7 @@ export const useFinanceStore = defineStore('finance', () => {
 
   async function fetchExpenses(includeArchived = false) {
     try {
-      const res = await fetch(`${base()}/api/expenses${includeArchived ? '?archived=1' : ''}`, { headers: authHeaders() })
+      const res = await apiFetch(`/api/expenses${includeArchived ? '?archived=1' : ''}`)
       if (!res.ok) throw new Error(await readError(res, 'Failed to load expenses'))
       const data = await res.json()
       expenses.value = data.expenses || []
@@ -81,7 +70,7 @@ export const useFinanceStore = defineStore('finance', () => {
   }
 
   async function createExpense(payload) {
-    const res = await fetch(`${base()}/api/expenses`, {
+    const res = await apiFetch('/api/expenses', {
       method: 'POST', headers: jsonHeaders(), body: JSON.stringify(payload),
     })
     if (!res.ok) throw new Error(await readError(res, 'Failed to create expense'))
@@ -91,7 +80,7 @@ export const useFinanceStore = defineStore('finance', () => {
   }
 
   async function archiveExpense(id) {
-    const res = await fetch(`${base()}/api/expenses/manage?id=${encodeURIComponent(id)}`, {
+    const res = await apiFetch(`/api/expenses/manage?id=${encodeURIComponent(id)}`, {
       method: 'DELETE', headers: authHeaders(),
     })
     if (!res.ok) throw new Error(await readError(res, 'Failed to archive expense'))
@@ -100,7 +89,7 @@ export const useFinanceStore = defineStore('finance', () => {
 
   async function fetchJournal() {
     try {
-      const res = await fetch(`${base()}/api/journal`, { headers: authHeaders() })
+      const res = await apiFetch('/api/journal')
       if (!res.ok) throw new Error(await readError(res, 'Failed to load journal'))
       const data = await res.json()
       journal.value = data.entries || []

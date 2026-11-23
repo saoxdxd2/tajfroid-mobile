@@ -42,12 +42,22 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPut:
 		var body struct {
-			Status string `json:"status"`
+			Status        string `json:"status"`
+			BaseUpdatedAt int64  `json:"baseUpdatedAt"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
 		if body.Status == "" {
 			http.Error(w, "status required", http.StatusBadRequest)
 			return
+		}
+		if body.BaseUpdatedAt > 0 {
+			cur, err := db.Execute("SELECT updated_at FROM checks WHERE id=?", lib.Text(id))
+			if err == nil && len(cur.Rows) > 0 && lib.ToInt64(cur.Rows[0][0]) != body.BaseUpdatedAt {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusConflict)
+				json.NewEncoder(w).Encode(map[string]interface{}{"error": "conflict: record changed on another device", "currentUpdatedAt": lib.ToInt64(cur.Rows[0][0])})
+				return
+			}
 		}
 		res, err := db.Execute("SELECT check_number, direction, status, amount, party_name FROM checks WHERE id = ?", lib.Text(id))
 		if err != nil || len(res.Rows) == 0 {

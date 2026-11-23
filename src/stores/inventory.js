@@ -93,7 +93,11 @@ export const useInventoryStore = defineStore('inventory', () => {
     const q = baseCatalogVersion ? `&baseCatalogVersion=${encodeURIComponent(baseCatalogVersion)}` : ''
     try {
       const res = await apiFetch(`/api/products/manage?sku=${encodeURIComponent(sku)}${q}`, { method: 'DELETE' })
-      if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e }
+      if (res.status === 409) {
+        const d = await res.json().catch(()=>({}))
+        await useMutationStore().recordConflict({ method:'DELETE', path:`/api/products/manage?sku=${encodeURIComponent(sku)}${q}`, body:null, entity:'product', entityId: sku, baseUpdatedAt: baseCatalogVersion, conflict:d, error:d.error })
+        const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e
+      }
       if (!res.ok) throw new Error('Failed to archive product')
     } catch (e) {
       if (!e.conflict && (!navigator.onLine || e instanceof TypeError)) {
@@ -185,7 +189,11 @@ export const useInventoryStore = defineStore('inventory', () => {
       headers: jsonHeaders(),
       body: JSON.stringify(body),
     })
-    if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict: stock changed'); e.conflict=true; e.current=d; throw e }
+    if (res.status === 409) {
+      const d = await res.json().catch(()=>({}))
+      await useMutationStore().recordConflict({ method:'POST', path:'/api/stock', body, entity:'stock', entityId: sku, baseUpdatedAt: baseStock, conflict:d, error:d.error })
+      const e = new Error(d.error||'Conflict: stock changed'); e.conflict=true; e.current=d; throw e
+    }
     if (!res.ok) {
       const d = await res.json().catch(() => ({}))
       throw new Error(d.error || 'Failed to adjust stock')

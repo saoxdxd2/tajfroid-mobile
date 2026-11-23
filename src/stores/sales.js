@@ -151,19 +151,20 @@ export const useSalesStore = defineStore('sales', () => {
     }
   }
 
-  async function removeItem(invoiceId, itemId) {
-    const path = `/api/invoices/items?id=${encodeURIComponent(itemId)}`
+  async function removeItem(invoiceId, itemId, baseUpdatedAt) {
+    const q = baseUpdatedAt ? `&baseUpdatedAt=${encodeURIComponent(baseUpdatedAt)}` : ''
+    const path = `/api/invoices/items?id=${encodeURIComponent(itemId)}${q}`
     try {
       const res = await apiFetch(path, { method: 'DELETE' })
       if (res.status === 409) {
         const d = await res.json().catch(()=>({}))
-        await useMutationStore().recordConflict({ method:'DELETE', path, body:null, entity:'invoice_item', entityId: itemId, conflict:d, error:d.error })
+        await useMutationStore().recordConflict({ method:'DELETE', path, body:null, entity:'invoice_item', entityId: itemId, baseUpdatedAt, conflict:d, error:d.error })
         const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e
       }
       if (!res.ok) throw new Error(await readError(res, 'Failed to remove item'))
     } catch (e) {
-      if (!navigator.onLine || e instanceof TypeError) {
-        await useMutationStore().enqueue({ method: 'DELETE', path, body: null, entity: 'invoice_item', entityId: itemId })
+      if (!e.conflict && (!navigator.onLine || e instanceof TypeError)) {
+        await useMutationStore().enqueue({ method: 'DELETE', path, body: null, entity: 'invoice_item', entityId: itemId, baseUpdatedAt })
         return
       }
       throw e

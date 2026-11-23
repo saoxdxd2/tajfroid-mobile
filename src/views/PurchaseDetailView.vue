@@ -113,7 +113,7 @@ async function addItem() {
 async function removeItem(id) {
   if (!confirm('Remove this line?')) return
   try {
-    await store.removeItem(route.params.id, id)
+    await store.removeItem(route.params.id, id, purchase.value?.updatedAt)
   } catch (e) {
     actionMsg.value = e.message
   }

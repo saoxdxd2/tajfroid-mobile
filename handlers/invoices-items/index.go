@@ -139,6 +139,16 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		invoiceID := lib.ToString(res.Rows[0][0])
+		if v := r.URL.Query().Get("baseUpdatedAt"); v != "" {
+			if base, err := strconv.ParseInt(v, 10, 64); err == nil && base > 0 {
+				if cur, err := db.Execute("SELECT updated_at FROM invoices WHERE id=?", lib.Text(invoiceID)); err == nil && len(cur.Rows) > 0 && lib.ToInt64(cur.Rows[0][0]) != base {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusConflict)
+					json.NewEncoder(w).Encode(map[string]interface{}{"error": "conflict: record changed on another device", "currentUpdatedAt": lib.ToInt64(cur.Rows[0][0])})
+					return
+				}
+			}
+		}
 		state, err := getInvoiceState(db, invoiceID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)

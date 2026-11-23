@@ -50,14 +50,23 @@ export const useInventoryStore = defineStore('inventory', () => {
   }
 
   async function createProduct(product) {
-    const res = await apiFetch('/api/products', {
-      method: 'POST',
-      headers: jsonHeaders(),
-      body: JSON.stringify(payload),
-    })
-    if (!res.ok) {
-      const d = await res.json().catch(() => ({}))
-      throw new Error(d.error || 'Failed to create product')
+    const body = { ...product }
+    try {
+      const res = await apiFetch('/api/products', {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        throw new Error(d.error || 'Failed to create product')
+      }
+    } catch (e) {
+      if (!navigator.onLine || e instanceof TypeError) {
+        await useMutationStore().enqueue({ method: 'POST', path: '/api/products', body, entity: 'product', entityId: body.sku })
+        return
+      }
+      throw e
     }
     await fetchProducts()
   }

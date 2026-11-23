@@ -117,7 +117,7 @@ function startEdit(c) {
 
 async function saveEdit() {
   try {
-    await store.update(editing.value.id, editForm.value)
+    await store.update(editing.value.id, { ...editForm.value, baseUpdatedAt: editing.value.updatedAt })
     editing.value = null
   } catch (e) {
     alert('Error: ' + e.message)

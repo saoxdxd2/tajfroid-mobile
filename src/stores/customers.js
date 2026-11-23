@@ -45,13 +45,22 @@ export const useCustomerStore = defineStore('customers', () => {
   }
 
   async function update(id, updates) {
-    const res = await apiFetch(`/api/customers/manage?id=${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      headers: jsonHeaders(),
-      body: JSON.stringify(updates),
-    })
-    if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict: record changed'); e.conflict=true; e.current=d; throw e }
-    if (!res.ok) throw new Error(await readError(res, 'Failed to update customer'))
+    const body = { ...updates }
+    try {
+      const res = await apiFetch(`/api/customers/manage?id=${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: jsonHeaders(),
+        body: JSON.stringify(body),
+      })
+      if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict: record changed'); e.conflict=true; e.current=d; throw e }
+      if (!res.ok) throw new Error(await readError(res, 'Failed to update customer'))
+    } catch (e) {
+      if (!e.conflict && (!navigator.onLine || e instanceof TypeError)) {
+        await useMutationStore().enqueue({ method: 'PUT', path: `/api/customers/manage?id=${encodeURIComponent(id)}`, body, entity: 'customer', entityId: id, baseUpdatedAt: body.baseUpdatedAt })
+        return
+      }
+      throw e
+    }
     await fetchAll()
   }
 

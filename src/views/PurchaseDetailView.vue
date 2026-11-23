@@ -132,7 +132,7 @@ async function validatePurchase() {
 async function deletePurchase() {
   if (!confirm('Delete this draft purchase?')) return
   try {
-    await store.remove(route.params.id)
+    await store.remove(route.params.id, purchase.value?.updatedAt)
     router.push('/purchases')
   } catch (e) {
     actionMsg.value = e.message

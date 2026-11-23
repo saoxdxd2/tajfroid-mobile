@@ -153,5 +153,30 @@ CREATE TABLE IF NOT EXISTS payments (
   updated_at INTEGER NOT NULL
 );
 
+-- Purchases
+CREATE TABLE IF NOT EXISTS purchases (
+  id TEXT PRIMARY KEY,
+  reference TEXT NOT NULL UNIQUE,
+  supplier_id TEXT NOT NULL REFERENCES suppliers(id),
+  state TEXT NOT NULL DEFAULT 'Draft',
+  total_amount TEXT NOT NULL DEFAULT '0',
+  purchase_date INTEGER,
+  supplier_invoice_no TEXT,
+  source_file_name TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS purchase_items (
+  id TEXT PRIMARY KEY,
+  purchase_id TEXT NOT NULL REFERENCES purchases(id),
+  product_sku TEXT NOT NULL,
+  product_name TEXT,
+  quantity INTEGER NOT NULL,
+  unit_cost TEXT NOT NULL DEFAULT '0',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(status);
 CREATE INDEX IF NOT EXISTS idx_scans_device ON scans(device_id);

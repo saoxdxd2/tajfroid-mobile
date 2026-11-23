@@ -54,17 +54,23 @@ body {
   left: 0;
   right: 0;
   display: flex;
-  justify-content: space-around;
-  padding: 10px;
+  justify-content: flex-start;
+  gap: 4px;
+  padding: 8px 4px;
   border-top: 1px solid #ccc;
   background: #1f3a5f;
   z-index: 100;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .bottom-nav a {
   color: #fff;
   text-decoration: none;
-  padding: 8px 12px;
+  padding: 6px 10px;
+  font-size: 0.85em;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .bottom-nav a.router-link-active {

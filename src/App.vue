@@ -3,6 +3,8 @@
     <nav class="bottom-nav">
       <router-link to="/catalog">Catalog</router-link>
       <router-link to="/inventory">Inventory</router-link>
+      <router-link to="/customers">Customers</router-link>
+      <router-link to="/suppliers">Suppliers</router-link>
       <router-link to="/scan">Scan</router-link>
       <router-link to="/queue">Queue</router-link>
       <router-link to="/account">Account</router-link>

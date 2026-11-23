@@ -77,5 +77,37 @@ CREATE TABLE IF NOT EXISTS brands (
   updated_at INTEGER NOT NULL
 );
 
+-- Customers
+CREATE TABLE IF NOT EXISTS customers (
+  id TEXT PRIMARY KEY,
+  party_type TEXT NOT NULL DEFAULT 'enterprise',
+  company_name TEXT NOT NULL,
+  first_name TEXT,
+  last_name TEXT,
+  contact_name TEXT,
+  email TEXT,
+  phone TEXT,
+  ice_number TEXT,
+  is_archived INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+-- Suppliers
+CREATE TABLE IF NOT EXISTS suppliers (
+  id TEXT PRIMARY KEY,
+  party_type TEXT NOT NULL DEFAULT 'enterprise',
+  company_name TEXT NOT NULL,
+  first_name TEXT,
+  last_name TEXT,
+  contact_name TEXT,
+  email TEXT,
+  phone TEXT,
+  ice_number TEXT,
+  is_archived INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(status);
 CREATE INDEX IF NOT EXISTS idx_scans_device ON scans(device_id);

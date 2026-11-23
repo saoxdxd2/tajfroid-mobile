@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiFetch, jsonHeaders, readError } from '../lib/api'
+import { useMutationStore } from './mutations'
 
 export const useInventoryStore = defineStore('inventory', () => {
   const products = ref([])
@@ -82,12 +83,22 @@ export const useInventoryStore = defineStore('inventory', () => {
   }
 
   async function createCategory(name) {
-    const res = await apiFetch('/api/categories', {
-      method: 'POST',
-      headers: jsonHeaders(),
-      body: JSON.stringify({ name }),
-    })
-    if (!res.ok) throw new Error('Failed to create category')
+    const body = { id: crypto.randomUUID(), name }
+    try {
+      const res = await apiFetch('/api/categories', {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error('Failed to create category')
+    } catch (e) {
+      if (!navigator.onLine || e instanceof TypeError) {
+        await useMutationStore().enqueue({ method: 'POST', path: '/api/categories', body, entity: 'category', entityId: body.id })
+        categories.value.push({ id: body.id, name, _pending: true })
+        return
+      }
+      throw e
+    }
     await fetchCategories()
   }
 
@@ -98,12 +109,22 @@ export const useInventoryStore = defineStore('inventory', () => {
   }
 
   async function createBrand(name) {
-    const res = await apiFetch('/api/brands', {
-      method: 'POST',
-      headers: jsonHeaders(),
-      body: JSON.stringify({ name }),
-    })
-    if (!res.ok) throw new Error('Failed to create brand')
+    const body = { id: crypto.randomUUID(), name }
+    try {
+      const res = await apiFetch('/api/brands', {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error('Failed to create brand')
+    } catch (e) {
+      if (!navigator.onLine || e instanceof TypeError) {
+        await useMutationStore().enqueue({ method: 'POST', path: '/api/brands', body, entity: 'brand', entityId: body.id })
+        brands.value.push({ id: body.id, name, _pending: true })
+        return
+      }
+      throw e
+    }
     await fetchBrands()
   }
 

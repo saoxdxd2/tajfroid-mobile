@@ -28,15 +28,26 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var body struct {
+			ID   string `json:"id"` // optional client idempotency key
 			Name string `json:"name"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
+		if body.ID != "" {
+			if ex, err := db.Execute("SELECT id, name FROM brands WHERE id=?", lib.Text(body.ID)); err == nil && len(ex.Rows) > 0 {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{"id": body.ID, "name": ex.Rows[0][1], "idempotent": true})
+				return
+			}
+		}
 		if body.Name == "" {
 			http.Error(w, "name required", http.StatusBadRequest)
 			return
 		}
 		now := time.Now().Unix()
-		id := lib.NewID()
+		id := body.ID
+		if id == "" {
+			id = lib.NewID()
+		}
 		_, err := db.Execute("INSERT INTO brands (id, name, created_at, updated_at) VALUES (?,?,?,?)",
 			lib.Text(id), lib.Text(body.Name), lib.Int(now), lib.Int(now))
 		if err != nil {

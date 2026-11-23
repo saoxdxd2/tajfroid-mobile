@@ -17,6 +17,16 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch r.Method {
+	case http.MethodGet:
+		res, err := db.Execute("SELECT id, reference, category, description, amount, is_archived, created_at, updated_at FROM expenses WHERE id=?", lib.Text(id))
+		if err != nil || len(res.Rows) == 0 {
+			http.Error(w, "expense not found", http.StatusNotFound)
+			return
+		}
+		row := res.Rows[0]
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"id": row[0], "reference": row[1], "category": row[2], "description": row[3], "amount": row[4], "isArchived": lib.ToInt(row[5]) == 1, "createdAt": row[6], "updatedAt": row[7]})
+
 	case http.MethodDelete:
 		if v := r.URL.Query().Get("baseUpdatedAt"); v != "" {
 			if base, err := strconv.ParseInt(v, 10, 64); err == nil && base > 0 {

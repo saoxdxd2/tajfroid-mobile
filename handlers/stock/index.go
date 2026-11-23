@@ -12,6 +12,17 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	db := lib.NewTurso()
 	switch r.Method {
 	case http.MethodGet:
+		if sku := r.URL.Query().Get("sku"); sku != "" {
+			res, err := db.Execute("SELECT sku, name, stock, active FROM catalog WHERE sku=?", lib.Text(sku))
+			if err != nil || len(res.Rows) == 0 {
+				http.Error(w, "product not found", http.StatusNotFound)
+				return
+			}
+			row := res.Rows[0]
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{"sku": row[0], "name": row[1], "stock": lib.ToInt(row[2]), "active": lib.ToInt(row[3]) == 1})
+			return
+		}
 		res, err := db.Execute("SELECT sku, name, stock, active FROM catalog ORDER BY name ASC")
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)

@@ -23,27 +23,39 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		row := res.Rows[0]
+		ver := catalogVersion(db)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"sku": row[0], "name": row[1], "description": nullableStr(row[2]),
 			"purchasePrice": row[3], "salePrice": row[4], "vatRate": row[5],
 			"stock": lib.ToInt(row[6]), "active": lib.ToInt(row[7]) == 1,
 			"category": nullableStr(row[8]), "brand": nullableStr(row[9]),
+			"catalogVersion": ver,
 		})
 
 	case http.MethodPut:
 		var body struct {
-			Name          string `json:"name"`
-			Description   string `json:"description"`
-			PurchasePrice string `json:"purchasePrice"`
-			SalePrice     string `json:"salePrice"`
-			VatRate       string `json:"vatRate"`
-			Stock         *int   `json:"stock"`
-			Active        *bool  `json:"active"`
-			Category      string `json:"category"`
-			Brand         string `json:"brand"`
+			Name               string `json:"name"`
+			Description        string `json:"description"`
+			PurchasePrice      string `json:"purchasePrice"`
+			SalePrice          string `json:"salePrice"`
+			VatRate            string `json:"vatRate"`
+			Stock              *int   `json:"stock"`
+			Active             *bool  `json:"active"`
+			Category           string `json:"category"`
+			Brand              string `json:"brand"`
+			BaseCatalogVersion int64  `json:"baseCatalogVersion"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
+		if body.BaseCatalogVersion > 0 {
+			cur := catalogVersion(db)
+			if cur != body.BaseCatalogVersion {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusConflict)
+				json.NewEncoder(w).Encode(map[string]interface{}{"error": "conflict: catalog changed on another device", "currentCatalogVersion": cur})
+				return
+			}
+		}
 		now := time.Now().Unix()
 		if body.Name != "" {
 			db.Execute("UPDATE catalog SET name=? WHERE sku=?", lib.Text(body.Name), lib.Text(sku))
@@ -100,4 +112,12 @@ func nullableStr(v interface{}) string {
 		return ""
 	}
 	return lib.ToString(v)
+}
+
+func catalogVersion(db *lib.TursoClient) int64 {
+	res, err := db.Execute("SELECT version FROM catalog_meta WHERE id=1")
+	if err != nil || len(res.Rows) == 0 {
+		return 0
+	}
+	return lib.ToInt64(res.Rows[0][0])
 }

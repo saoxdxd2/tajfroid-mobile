@@ -43,7 +43,8 @@ not bypass or create a second project.
 curl -sS https://mobile.tajfroid.com/api/health
 ```
 
-Expected: HTTP 200, `status: ok`, `turso: ok`, both auth indexes present.
+Expected: HTTP 200, `status: ok`, `checks.database: true`,
+`checks.auth_indexes: true`, and both entries under `indexes` true.
 
 If metrics are enabled in the deployment env:
 

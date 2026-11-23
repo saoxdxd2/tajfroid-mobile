@@ -24,6 +24,11 @@ const (
 
 	// metricWindow is the number of most recent samples kept per route+status.
 	metricWindow = 1000
+	// maxMetricKeys bounds cardinality. A caller-controlled __route must not be
+	// able to grow the map without limit on a warm serverless instance.
+	maxMetricKeys = 256
+	// overflowMetricKey aggregates every key beyond maxMetricKeys.
+	overflowMetricKey = "overflow"
 )
 
 type requestIDKey struct{}
@@ -211,6 +216,9 @@ func (m *LatencyMetrics) Record(route string, status int, d time.Duration) {
 	defer m.mu.Unlock()
 	if m.samples == nil {
 		m.samples = make(map[string][]float64)
+	}
+	if _, exists := m.samples[key]; !exists && len(m.samples) >= maxMetricKeys {
+		key = overflowMetricKey
 	}
 	s := append(m.samples[key], sample)
 	if len(s) > metricWindow {

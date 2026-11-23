@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -141,6 +142,21 @@ func TestLatencyMetricsRollingWindow(t *testing.T) {
 	snap.Routes["invoices:200"] = LatencyStats{}
 	if again := m.Snapshot(); again.Routes["invoices:200"].Count != metricWindow {
 		t.Fatal("snapshot must be a copy of the live metrics")
+	}
+}
+
+func TestLatencyMetricsBoundCardinality(t *testing.T) {
+	m := NewLatencyMetrics()
+	for i := 0; i < maxMetricKeys+25; i++ {
+		m.Record("route-"+strconv.Itoa(i), http.StatusOK, time.Millisecond)
+	}
+	snap := m.Snapshot()
+	if len(snap.Routes) > maxMetricKeys+1 {
+		t.Fatalf("metric keys = %d, want at most %d plus overflow", len(snap.Routes), maxMetricKeys)
+	}
+	overflow, ok := snap.Routes[overflowMetricKey]
+	if !ok || overflow.Count != 25 {
+		t.Fatalf("overflow bucket: %#v", snap.Routes[overflowMetricKey])
 	}
 }
 

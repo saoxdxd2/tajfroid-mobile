@@ -5,6 +5,7 @@
   "framework": "vite",
   "rewrites": [
     { "source": "/api/agent/scans/([^/]+)/status", "destination": "/api/agent/scan_status?id=$1" },
-    { "source": "/api/agent/scans/([^/]+)/file", "destination": "/api/agent/scan_file?id=$1" }
+    { "source": "/api/agent/scans/([^/]+)/file", "destination": "/api/agent/scan_file?id=$1" },
+    { "source": "/((?!api/)[^.]*)", "destination": "/index.html" }
   ]
 }

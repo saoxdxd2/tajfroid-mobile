@@ -21,7 +21,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		includeArchived := r.URL.Query().Get("archived") == "1"
-		q := "SELECT id, reference, category, description, amount, is_archived, created_at FROM expenses"
+		q := "SELECT id, reference, category, description, amount, is_archived, created_at, updated_at FROM expenses"
 		if !includeArchived {
 			q += " WHERE is_archived = 0"
 		}
@@ -39,7 +39,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			items = append(items, map[string]interface{}{
 				"id": row[0], "reference": row[1], "category": row[2],
 				"description": row[3], "amount": row[4],
-				"isArchived": lib.ToInt(row[5]) == 1, "createdAt": row[6],
+				"isArchived": lib.ToInt(row[5]) == 1, "createdAt": row[6], "updatedAt": row[7],
 			})
 		}
 		w.Header().Set("Content-Type", "application/json")

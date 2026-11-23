@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"tajfroid-mobile/lib"
@@ -95,6 +96,16 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 
 	case http.MethodDelete:
+		if v := r.URL.Query().Get("baseCatalogVersion"); v != "" {
+			if base, err := strconv.ParseInt(v, 10, 64); err == nil && base > 0 {
+				if cur := catalogVersion(db); cur != base {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusConflict)
+					json.NewEncoder(w).Encode(map[string]interface{}{"error": "conflict: catalog changed on another device", "currentCatalogVersion": cur})
+					return
+				}
+			}
+		}
 		// Archive (soft delete) — set active=0
 		now := time.Now().Unix()
 		db.Execute("UPDATE catalog SET active=0 WHERE sku=?", lib.Text(sku))

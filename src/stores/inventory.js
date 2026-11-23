@@ -63,22 +63,41 @@ export const useInventoryStore = defineStore('inventory', () => {
   }
 
   async function updateProduct(sku, updates) {
-    const res = await apiFetch(`/api/products/manage?sku=${encodeURIComponent(sku)}`, {
-      method: 'PUT',
-      headers: jsonHeaders(),
-      body: JSON.stringify(updates),
-    })
-    if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e }
-    if (!res.ok) {
-      const d = await res.json().catch(() => ({}))
-      throw new Error(d.error || 'Failed to update product')
+    const body = { ...updates }
+    try {
+      const res = await apiFetch(`/api/products/manage?sku=${encodeURIComponent(sku)}`, {
+        method: 'PUT',
+        headers: jsonHeaders(),
+        body: JSON.stringify(body),
+      })
+      if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e }
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        throw new Error(d.error || 'Failed to update product')
+      }
+    } catch (e) {
+      if (!e.conflict && (!navigator.onLine || e instanceof TypeError)) {
+        await useMutationStore().enqueue({ method: 'PUT', path: `/api/products/manage?sku=${encodeURIComponent(sku)}`, body, entity: 'product', entityId: sku, baseUpdatedAt: body.baseCatalogVersion })
+        return
+      }
+      throw e
     }
     await fetchProducts()
   }
 
-  async function deleteProduct(sku) {
-    const res = await apiFetch(`/api/products/manage?sku=${encodeURIComponent(sku)}`, { method: 'DELETE' })
-    if (!res.ok) throw new Error('Failed to archive product')
+  async function deleteProduct(sku, baseCatalogVersion = catalogVersion.value) {
+    const q = baseCatalogVersion ? `&baseCatalogVersion=${encodeURIComponent(baseCatalogVersion)}` : ''
+    try {
+      const res = await apiFetch(`/api/products/manage?sku=${encodeURIComponent(sku)}${q}`, { method: 'DELETE' })
+      if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e }
+      if (!res.ok) throw new Error('Failed to archive product')
+    } catch (e) {
+      if (!e.conflict && (!navigator.onLine || e instanceof TypeError)) {
+        await useMutationStore().enqueue({ method: 'DELETE', path: `/api/products/manage?sku=${encodeURIComponent(sku)}${q}`, body: null, entity: 'product', entityId: sku, baseUpdatedAt: baseCatalogVersion })
+        return
+      }
+      throw e
+    }
     await fetchProducts()
   }
 

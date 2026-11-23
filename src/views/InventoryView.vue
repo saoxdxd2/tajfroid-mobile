@@ -168,7 +168,7 @@ async function saveEdit() {
 async function remove(sku) {
   if (!confirm('Archive this product?')) return
   try {
-    await store.deleteProduct(sku)
+    await store.deleteProduct(sku, store.catalogVersion)
   } catch (e) {
     alert('Error: ' + e.message)
   }

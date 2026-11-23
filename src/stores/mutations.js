@@ -137,5 +137,12 @@ export const useMutationStore = defineStore('mutations', () => {
     flush().catch(() => {})
   }
 
-  return { items, syncing, lastError, load, enqueue, flush, remove, retry }
+  async function updateBody(id, body) {
+    const item = items.value.find(x => x.id === id)
+    if (!item) return
+    const next = { ...item, body, status: 'pending', lastError: null, updatedAt: Date.now() }
+    await idbPut(next); replace(next)
+  }
+
+  return { items, syncing, lastError, load, enqueue, flush, remove, retry, updateBody }
 })

@@ -14,7 +14,10 @@
         </div>
         <div class="path">{{ m.path }}</div>
         <div v-if="m.lastError" class="err">{{ m.lastError }}</div>
-        <details v-if="m.body" class="payload"><summary>Payload</summary><pre>{{ pretty(m.body) }}</pre></details>
+        <details v-if="m.body" class="payload"><summary>Payload / merge</summary>
+          <textarea v-model="edits[m.id]" rows="5" class="edit"></textarea>
+          <div class="actions"><button @click="savePayload(m.id)">Save payload</button></div>
+        </details>
         <div class="actions">
           <button v-if="m.status==='conflict'" @click="retry(m.id)">Retry local</button>
           <button v-if="m.status==='conflict'" @click="dismiss(m.id)">Keep server (dismiss)</button>
@@ -28,18 +31,26 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useMutationStore } from '../stores/mutations'
 const store = useMutationStore()
 const open = ref(false)
+const edits = reactive({})
 const items = computed(() => store.items)
 const syncing = computed(() => store.syncing)
 const pending = computed(() => items.value.filter(i => i.status === 'pending').length)
 const conflicts = computed(() => items.value.filter(i => i.status === 'conflict').length)
+watch(items, (list) => { for (const m of list) if (edits[m.id] === undefined) edits[m.id] = pretty(m.body) }, { immediate: true, deep: true })
 function retry(id) { store.retry(id) }
 function remove(id) { store.remove(id) }
 function dismiss(id) { store.remove(id) }
-function pretty(v) { try { return JSON.stringify(v, null, 2) } catch { return String(v) } }
+function pretty(v) { try { return JSON.stringify(v ?? {}, null, 2) } catch { return String(v) } }
+async function savePayload(id) {
+  try {
+    const body = JSON.parse(edits[id] || '{}')
+    await store.updateBody(id, body)
+  } catch (e) { alert('Invalid JSON: ' + e.message) }
+}
 </script>
 
 <style scoped>
@@ -54,6 +65,7 @@ function pretty(v) { try { return JSON.stringify(v, null, 2) } catch { return St
 .path { color: #555; word-break: break-all; }
 .err { color: #7a1a00; margin: 4px 0; white-space: pre-wrap; }
 .payload pre { max-height: 120px; overflow: auto; background: #fff; padding: 4px; margin: 4px 0; font-size: 11px; }
+.edit { width: 100%; font-family: monospace; font-size: 11px; margin: 4px 0; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .actions button { font-size: 11px; padding: 2px 8px; }
 .hint { color: #555; margin: 8px 0 0; }

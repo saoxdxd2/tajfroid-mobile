@@ -106,20 +106,33 @@ function readPathFor(m) {
     brand: `/api/brands/manage?id=${id}`,
     expense: `/api/expenses/manage?id=${id}`,
     stock: `/api/stock?sku=${id}`,
+    check: `/api/checks/manage?id=${id}`,
   }
   return map[m.entity] || null
 }
+function seedServerFromConflict(m) {
+  const c = m?.conflict || {}
+  const candidate = c.current || c.record || c.server || c.currentRecord || c
+  if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+    const keys = Object.keys(candidate).filter(k => k !== 'error')
+    if (keys.length) { server[m.id] = candidate; return true }
+  }
+  return false
+}
 async function fetchServer(m) {
+  if (seedServerFromConflict(m)) {
+    mergeSel[m.id] = mergeSel[m.id] || {}
+    for (const k of diffKeys(m)) mergeSel[m.id][k] = mergeSel[m.id][k] || 'local'
+    return
+  }
   const p = readPathFor(m)
-  if (!p) { alert('No server read endpoint mapped for this entity'); return }
+  if (!p) { alert('No server read endpoint mapped for this entity. Paste server JSON below.'); return }
   try {
     const res = await apiFetch(p)
     if (!res.ok) throw new Error(await res.text())
     server[m.id] = await res.json()
-    const local = safeObj(edits[m.id])
-    const s = server[m.id] || {}
     mergeSel[m.id] = mergeSel[m.id] || {}
-    for (const k of diffKeys(m)) mergeSel[m.id][k] = mergeSel[m.id][k] || (JSON.stringify(local[k]) === JSON.stringify(s[k]) ? 'local' : 'local')
+    for (const k of diffKeys(m)) mergeSel[m.id][k] = mergeSel[m.id][k] || 'local'
   } catch (e) { alert('Failed to load server: ' + e.message) }
 }
 function safeObj(s) { try { return JSON.parse(s||'{}') } catch { return {} } }

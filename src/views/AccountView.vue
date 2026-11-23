@@ -23,6 +23,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useDeviceStore } from '../stores/device'
+import { useMutationStore } from '../stores/mutations'
 import { apiFetch, readError } from '../lib/api'
 
 const store = useDeviceStore()
@@ -46,11 +47,24 @@ async function loadDevices() {
 
 async function revoke(id) {
   if (!confirm('Revoke this device? It will need to pair again.')) return
+  const path = `/api/devices/manage?id=${encodeURIComponent(id)}`
   try {
-    const res = await apiFetch(`/api/devices/manage?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+    const res = await apiFetch(path, { method: 'DELETE' })
+    if (res.status === 409) {
+      const d = await res.json().catch(()=>({}))
+      await useMutationStore().recordConflict({ method:'DELETE', path, body:null, entity:'device', entityId:id, conflict:d, error:d.error })
+      throw new Error(d.error || 'Conflict')
+    }
     if (!res.ok) throw new Error(await readError(res, 'Failed to revoke'))
     await loadDevices()
-  } catch (e) { error.value = e.message }
+  } catch (e) {
+    if (!e.conflict && (!navigator.onLine || e instanceof TypeError)) {
+      await useMutationStore().enqueue({ method:'DELETE', path, body:null, entity:'device', entityId:id })
+      error.value = 'Offline: revoke queued'
+      return
+    }
+    error.value = e.message
+  }
 }
 
 function fmt(ts) { if (!ts) return ''; return new Date(ts * 1000).toLocaleString() }

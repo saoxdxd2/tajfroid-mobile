@@ -1,8 +1,11 @@
 package handler
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"tajfroid-mobile/lib"
@@ -31,11 +34,37 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(count.Rows) > 0 {
-		http.Error(w, "an agent is already registered; authenticate with its token", http.StatusConflict)
-		return
+		authorized := false
+		if key := os.Getenv("BOOTSTRAP_RECOVERY_KEY"); key != "" {
+			if got := r.Header.Get("X-Bootstrap-Recovery"); got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(key)) == 1 {
+				authorized = true
+			}
+		}
+		if !authorized {
+			if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+				tok := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
+				if tok != "" {
+					h := lib.Sha256Hex(tok)
+					if row, err := db.Execute("SELECT id FROM agent_tokens WHERE token_hash=?", lib.Text(h)); err == nil && len(row.Rows) > 0 {
+						authorized = true
+					}
+				}
+			}
+		}
+		if !authorized {
+			http.Error(w, "an agent is already registered; provide valid agent Authorization or X-Bootstrap-Recovery", http.StatusConflict)
+			return
+		}
 	}
 	token := lib.NewToken()
 	hash := lib.Sha256Hex(token)
+	if len(count.Rows) > 0 {
+		// Recovery/re-bootstrap: replace old agent tokens to avoid orphaned valid credentials.
+		if _, err := db.Execute("DELETE FROM agent_tokens"); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
 	if _, err := db.Execute("INSERT INTO agent_tokens (id, token_hash, device_id, created_at) VALUES (?,?,?,?)",
 		lib.Text(lib.NewID()), lib.Text(hash), lib.Text(body.DeviceID), lib.Int(time.Now().Unix())); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

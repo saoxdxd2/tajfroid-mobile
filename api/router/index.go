@@ -24,12 +24,18 @@ import (
 	catalog "tajfroid-mobile/handlers/catalog"
 	categories "tajfroid-mobile/handlers/categories"
 	categoriesmanage "tajfroid-mobile/handlers/categories-manage"
+	checks "tajfroid-mobile/handlers/checks"
+	checksmanage "tajfroid-mobile/handlers/checks-manage"
 	customers "tajfroid-mobile/handlers/customers"
 	customersmanage "tajfroid-mobile/handlers/customers-manage"
+	expenses "tajfroid-mobile/handlers/expenses"
+	expensesmanage "tajfroid-mobile/handlers/expenses-manage"
+	finance "tajfroid-mobile/handlers/finance"
 	health "tajfroid-mobile/handlers/health"
 	invoices "tajfroid-mobile/handlers/invoices"
 	invoicesitems "tajfroid-mobile/handlers/invoices-items"
 	invoicesmanage "tajfroid-mobile/handlers/invoices-manage"
+	journal "tajfroid-mobile/handlers/journal"
 	pair "tajfroid-mobile/handlers/pair"
 	payments "tajfroid-mobile/handlers/payments"
 	products "tajfroid-mobile/handlers/products"
@@ -133,6 +139,19 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		purchasesmanage.Handler(w, r)
 	case "purchases/items":
 		purchasesitems.Handler(w, r)
+
+	case "checks":
+		checks.Handler(w, r)
+	case "checks/manage":
+		checksmanage.Handler(w, r)
+	case "expenses":
+		expenses.Handler(w, r)
+	case "expenses/manage":
+		expensesmanage.Handler(w, r)
+	case "finance":
+		finance.Handler(w, r)
+	case "journal":
+		journal.Handler(w, r)
 
 	default:
 		http.NotFound(w, r)

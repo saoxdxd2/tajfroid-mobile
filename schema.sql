@@ -147,6 +147,7 @@ CREATE TABLE IF NOT EXISTS payments (
   invoice_id TEXT NOT NULL REFERENCES invoices(id),
   method TEXT NOT NULL DEFAULT 'Cash',
   amount TEXT NOT NULL DEFAULT '0',
+  check_id TEXT,
   reference TEXT,
   notes TEXT,
   created_at INTEGER NOT NULL,
@@ -176,6 +177,47 @@ CREATE TABLE IF NOT EXISTS purchase_items (
   unit_cost TEXT NOT NULL DEFAULT '0',
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
+);
+
+-- Checks (physical paper, incoming from customers / outgoing to suppliers)
+CREATE TABLE IF NOT EXISTS checks (
+  id TEXT PRIMARY KEY,
+  check_number TEXT NOT NULL,
+  direction TEXT NOT NULL DEFAULT 'Incoming',
+  status TEXT NOT NULL DEFAULT 'Pending',
+  amount TEXT NOT NULL,
+  due_date INTEGER NOT NULL,
+  bank TEXT,
+  party_name TEXT NOT NULL,
+  customer_id TEXT,
+  supplier_id TEXT,
+  notes TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+-- Expenses
+CREATE TABLE IF NOT EXISTS expenses (
+  id TEXT PRIMARY KEY,
+  reference TEXT NOT NULL UNIQUE,
+  category TEXT NOT NULL DEFAULT 'Other',
+  description TEXT NOT NULL,
+  amount TEXT NOT NULL,
+  is_archived INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+-- Immutable financial journal
+CREATE TABLE IF NOT EXISTS journal_entries (
+  id TEXT PRIMARY KEY,
+  transaction_type TEXT NOT NULL,
+  reference_id TEXT NOT NULL,
+  description TEXT NOT NULL,
+  amount TEXT NOT NULL,
+  is_reversed INTEGER NOT NULL DEFAULT 0,
+  reversal_reference TEXT,
+  created_at INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(status);

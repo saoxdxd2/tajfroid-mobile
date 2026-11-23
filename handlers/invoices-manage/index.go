@@ -166,6 +166,9 @@ func validateInvoice(db *lib.TursoClient, id string) error {
 	if _, err := db.Execute("UPDATE invoices SET state=?, updated_at=? WHERE id=?", lib.Text("Validated"), lib.Int(now), lib.Text(id)); err != nil {
 		return err
 	}
+	lib.Journal(db, lib.TxSale, "INV-"+lib.ToString(inv["invoiceNumber"]),
+		"Invoice validated for "+lib.ToString(inv["customerId"]),
+		lib.ParseMoney(lib.ToString(inv["totalAmount"])), time.Now())
 	bumpCatalog(db, now)
 	return nil
 }

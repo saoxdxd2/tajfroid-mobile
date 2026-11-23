@@ -83,8 +83,16 @@
         </select>
         <label>Amount (DH)</label>
         <input v-model="payForm.amount" type="number" step="0.01" />
-        <label v-if="payForm.method === 'Check'">Check number</label>
-        <input v-if="payForm.method === 'Check'" v-model="payForm.reference" placeholder="Check number" />
+        <label v-if="payForm.method === 'Check'">Registered incoming check</label>
+        <select v-if="payForm.method === 'Check'" v-model="payForm.checkId" @change="pickCheck">
+          <option value="">-- Select a check --</option>
+          <option v-for="c in incomingChecks" :key="c.id" :value="c.id">
+            #{{ c.checkNumber }} — {{ c.partyName }} — {{ c.amount }} DH ({{ c.status }})
+          </option>
+        </select>
+        <p v-if="payForm.method === 'Check' && !incomingChecks.length" class="muted">
+          Register the check first in Finance → Checks.
+        </p>
         <label>Notes</label>
         <input v-model="payForm.notes" placeholder="Notes" />
         <button @click="registerPayment" class="primary">Save payment</button>
@@ -115,10 +123,12 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useSalesStore } from '../stores/sales'
 import { useInventoryStore } from '../stores/inventory'
+import { useFinanceStore } from '../stores/finance'
 
 const route = useRoute()
 const store = useSalesStore()
 const inventory = useInventoryStore()
+const finance = useFinanceStore()
 const inv = computed(() => store.current)
 const itemMsg = ref('')
 const actionMsg = ref('')
@@ -129,16 +139,21 @@ const itemForm = ref({
   productSku: '', quantity: 1, unitPrice: '', vatRate: '20',
   warrantyMonths: 12, descriptionOverride: '',
 })
-const payForm = ref({ method: 'Cash', amount: '', reference: '', notes: '' })
+const payForm = ref({ method: 'Cash', amount: '', checkId: '', reference: '', notes: '' })
 
 const activeProducts = computed(() => inventory.products.filter(p => p.active))
+const incomingChecks = computed(() =>
+  finance.checks.filter(c =>
+    c.direction === 'Incoming' &&
+    ['Pending', 'Deposited', 'Cleared'].includes(c.status) &&
+    (!inv.value || !c.customerId || c.customerId === inv.value.customerId)))
 const canPay = computed(() =>
   inv.value && (inv.value.state === 'Validated' || inv.value.state === 'Issued'))
 
 onMounted(load)
 
 async function load() {
-  await Promise.all([store.fetchInvoice(route.params.id), inventory.fetchProducts()])
+  await Promise.all([store.fetchInvoice(route.params.id), inventory.fetchProducts(), finance.fetchChecks()])
   if (inv.value) payForm.value.amount = inv.value.balance
 }
 
@@ -209,12 +224,20 @@ async function archive() {
   }
 }
 
+function pickCheck() {
+  const check = finance.checks.find(c => c.id === payForm.value.checkId)
+  if (!check) return
+  payForm.value.amount = check.amount
+  payForm.value.reference = check.checkNumber
+}
+
 async function registerPayment() {
   payMsg.value = ''
   try {
     await store.pay({ invoiceId: route.params.id, ...payForm.value })
     showPay.value = false
-    payForm.value = { method: 'Cash', amount: '', reference: '', notes: '' }
+    payForm.value = { method: 'Cash', amount: '', checkId: '', reference: '', notes: '' }
+    await finance.fetchChecks()
   } catch (e) {
     payMsg.value = e.message
   }

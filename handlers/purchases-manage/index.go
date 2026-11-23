@@ -156,6 +156,12 @@ func validatePurchase(db *lib.TursoClient, id string) error {
 	if _, err := db.Execute("UPDATE purchases SET state=?, updated_at=? WHERE id=?", lib.Text("Validated"), lib.Int(now), lib.Text(id)); err != nil {
 		return err
 	}
+	ref, _ := db.Execute("SELECT reference, supplier_id, total_amount FROM purchases WHERE id = ?", lib.Text(id))
+	if len(ref.Rows) > 0 {
+		lib.Journal(db, lib.TxPurchase, "PUR-"+lib.ToString(ref.Rows[0][0]),
+			"Purchase validated from supplier "+lib.ToString(ref.Rows[0][1]),
+			-lib.ParseMoney(lib.ToString(ref.Rows[0][2])), time.Now())
+	}
 	db.Execute("INSERT INTO catalog_meta (id, version, updated_at) VALUES (1, 1, ?) ON CONFLICT(id) DO UPDATE SET version = version + 1, updated_at = excluded.updated_at", lib.Int(now))
 	return nil
 }

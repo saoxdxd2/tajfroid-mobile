@@ -15,7 +15,13 @@
         <div class="path">{{ m.path }}</div>
         <div v-if="m.lastError" class="err">{{ m.lastError }}</div>
         <details v-if="m.body" class="payload"><summary>Payload / merge</summary>
-          <textarea v-model="edits[m.id]" rows="5" class="edit"></textarea>
+          <div v-if="isFlat(m.body)" class="fields">
+            <label v-for="(v,k) in m.body" :key="k" class="field">
+              <span>{{ k }}</span>
+              <input :value="fieldValue(m.id,k,v)" @input="setField(m.id,k,$event.target.value,v)" />
+            </label>
+          </div>
+          <textarea v-else v-model="edits[m.id]" rows="5" class="edit"></textarea>
           <div class="actions"><button @click="savePayload(m.id)">Save payload</button></div>
         </details>
         <div class="actions">
@@ -45,6 +51,16 @@ function retry(id) { store.retry(id) }
 function remove(id) { store.remove(id) }
 function dismiss(id) { store.remove(id) }
 function pretty(v) { try { return JSON.stringify(v ?? {}, null, 2) } catch { return String(v) } }
+function isFlat(v) { return v && typeof v === 'object' && !Array.isArray(v) && Object.values(v).every(x => ['string','number','boolean'].includes(typeof x) || x === null) }
+function fieldValue(id,k,orig) { try { const o = JSON.parse(edits[id]||'{}'); return o[k] ?? '' } catch { return orig ?? '' } }
+function setField(id,k,val,orig) {
+  let o = {}
+  try { o = JSON.parse(edits[id] || '{}') } catch { o = {} }
+  if (typeof orig === 'number') { const n = Number(val); o[k] = Number.isFinite(n) ? n : val }
+  else if (typeof orig === 'boolean') { o[k] = val === 'true' }
+  else o[k] = val
+  edits[id] = pretty(o)
+}
 async function savePayload(id) {
   try {
     const body = JSON.parse(edits[id] || '{}')
@@ -66,6 +82,9 @@ async function savePayload(id) {
 .err { color: #7a1a00; margin: 4px 0; white-space: pre-wrap; }
 .payload pre { max-height: 120px; overflow: auto; background: #fff; padding: 4px; margin: 4px 0; font-size: 11px; }
 .edit { width: 100%; font-family: monospace; font-size: 11px; margin: 4px 0; }
+.fields { display: grid; gap: 4px; margin: 4px 0; }
+.field { display: grid; grid-template-columns: minmax(80px, 1fr) 2fr; gap: 6px; align-items: center; }
+.field input { width: 100%; font-size: 11px; padding: 2px 4px; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .actions button { font-size: 11px; padding: 2px 8px; }
 .hint { color: #555; margin: 8px 0 0; }

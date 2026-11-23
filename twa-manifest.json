@@ -1,0 +1,33 @@
+{
+  "packageId": "com.tajfroid.mobile",
+  "host": "mobile.tajfroid.com",
+  "name": "Taj-Froid Mobile",
+  "launcherName": "TajFroid",
+  "display": "standalone",
+  "themeColor": "#1f3a5f",
+  "navigationColor": "#1f3a5f",
+  "backgroundColor": "#ffffff",
+  "enableNotifications": true,
+  "startUrl": "/",
+  "iconUrl": "https://mobile.tajfroid.com/pwa-512x512.png",
+  "maskableIconUrl": "https://mobile.tajfroid.com/pwa-512x512.png",
+  "shortcuts": [],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://mobile.tajfroid.com/manifest.webmanifest",
+  "fallbackType": "customtabs",
+  "features": {},
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": false,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://mobile.tajfroid.com/",
+  "minSdkVersion": 21,
+  "orientation": "portrait",
+  "fingerprints": [],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "appVersionCode": 1,
+  "appVersionName": "1.0.0"
+}

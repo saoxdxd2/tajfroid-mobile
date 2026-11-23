@@ -40,9 +40,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		if body.BaseUpdatedAt > 0 {
 			cur, err := db.Execute("SELECT updated_at FROM purchases WHERE id=?", lib.Text(id))
 			if err == nil && len(cur.Rows) > 0 && lib.ToInt64(cur.Rows[0][0]) != body.BaseUpdatedAt {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusConflict)
-				json.NewEncoder(w).Encode(map[string]interface{}{"error": "conflict: record changed on another device", "currentUpdatedAt": lib.ToInt64(cur.Rows[0][0])})
+				lib.WriteConflict(w, lib.ToInt64(cur.Rows[0][0]))
 				return
 			}
 		}
@@ -73,9 +71,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		if v := r.URL.Query().Get("baseUpdatedAt"); v != "" {
 			if base, err := strconv.ParseInt(v, 10, 64); err == nil && base > 0 {
 				if cur, err := db.Execute("SELECT updated_at FROM purchases WHERE id=?", lib.Text(id)); err == nil && len(cur.Rows) > 0 && lib.ToInt64(cur.Rows[0][0]) != base {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusConflict)
-					json.NewEncoder(w).Encode(map[string]interface{}{"error": "conflict: record changed on another device", "currentUpdatedAt": lib.ToInt64(cur.Rows[0][0])})
+					lib.WriteConflict(w, lib.ToInt64(cur.Rows[0][0]))
 					return
 				}
 			}
@@ -212,10 +208,10 @@ func loadPurchase(db *lib.TursoClient, id string) (map[string]interface{}, error
 	row := res.Rows[0]
 	purchase := map[string]interface{}{
 		"id": row[0], "reference": row[1], "supplierId": row[2],
-		"supplierName": nullableStr(row[3]), "state": row[4],
+		"supplierName": lib.NullStr(row[3]), "state": row[4],
 		"totalAmount": lib.FormatMoney(lib.ParseMoney(lib.ToString(row[5]))),
-		"purchaseDate": row[6], "supplierInvoiceNo": nullableStr(row[7]),
-		"sourceFileName": nullableStr(row[8]), "createdAt": row[9], "updatedAt": row[10],
+		"purchaseDate": row[6], "supplierInvoiceNo": lib.NullStr(row[7]),
+		"sourceFileName": lib.NullStr(row[8]), "createdAt": row[9], "updatedAt": row[10],
 	}
 	itemRes, err := db.Execute(`SELECT id, product_sku, product_name, quantity, unit_cost, created_at
 		FROM purchase_items WHERE purchase_id = ? ORDER BY created_at ASC`, lib.Text(id))
@@ -225,7 +221,7 @@ func loadPurchase(db *lib.TursoClient, id string) (map[string]interface{}, error
 	items := []map[string]interface{}{}
 	for _, it := range itemRes.Rows {
 		items = append(items, map[string]interface{}{
-			"id": it[0], "productSku": it[1], "productName": nullableStr(it[2]),
+			"id": it[0], "productSku": it[1], "productName": lib.NullStr(it[2]),
 			"quantity": lib.ToInt(it[3]), "unitCost": it[4], "createdAt": it[5],
 		})
 	}
@@ -237,9 +233,3 @@ type errText string
 
 func (e errText) Error() string { return string(e) }
 
-func nullableStr(v interface{}) string {
-	if v == nil {
-		return ""
-	}
-	return lib.ToString(v)
-}

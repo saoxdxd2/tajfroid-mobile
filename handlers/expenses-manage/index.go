@@ -32,9 +32,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			if base, err := strconv.ParseInt(v, 10, 64); err == nil && base > 0 {
 				cur, err := db.Execute("SELECT updated_at FROM expenses WHERE id=?", lib.Text(id))
 				if err == nil && len(cur.Rows) > 0 && lib.ToInt64(cur.Rows[0][0]) != base {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusConflict)
-					json.NewEncoder(w).Encode(map[string]interface{}{"error": "conflict: record changed on another device", "currentUpdatedAt": lib.ToInt64(cur.Rows[0][0])})
+					lib.WriteConflict(w, lib.ToInt64(cur.Rows[0][0]))
 					return
 				}
 			}

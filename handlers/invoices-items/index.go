@@ -142,9 +142,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		if v := r.URL.Query().Get("baseUpdatedAt"); v != "" {
 			if base, err := strconv.ParseInt(v, 10, 64); err == nil && base > 0 {
 				if cur, err := db.Execute("SELECT updated_at FROM invoices WHERE id=?", lib.Text(invoiceID)); err == nil && len(cur.Rows) > 0 && lib.ToInt64(cur.Rows[0][0]) != base {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusConflict)
-					json.NewEncoder(w).Encode(map[string]interface{}{"error": "conflict: record changed on another device", "currentUpdatedAt": lib.ToInt64(cur.Rows[0][0])})
+					lib.WriteConflict(w, lib.ToInt64(cur.Rows[0][0]))
 					return
 				}
 			}
@@ -185,10 +183,10 @@ func listItems(db *lib.TursoClient, invoiceID string) ([]map[string]interface{},
 	items := []map[string]interface{}{}
 	for _, row := range res.Rows {
 		items = append(items, map[string]interface{}{
-			"id": row[0], "productSku": row[1], "productName": nullableStr(row[2]),
+			"id": row[0], "productSku": row[1], "productName": lib.NullStr(row[2]),
 			"quantity": lib.ToInt(row[3]), "unitPrice": row[4], "vatRate": row[5],
 			"unitCost": row[6], "warrantyMonths": lib.ToInt(row[7]),
-			"descriptionOverride": nullableStr(row[8]), "warrantyEndDate": row[9],
+			"descriptionOverride": lib.NullStr(row[8]), "warrantyEndDate": row[9],
 			"createdAt": row[10],
 		})
 	}
@@ -235,12 +233,6 @@ type errText string
 
 func (e errText) Error() string { return string(e) }
 
-func nullableStr(v interface{}) string {
-	if v == nil {
-		return ""
-	}
-	return lib.ToString(v)
-}
 
 func nullableText(s string) lib.TursoArg {
 	if s == "" {

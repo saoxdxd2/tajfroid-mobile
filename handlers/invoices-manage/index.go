@@ -40,9 +40,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		if body.BaseUpdatedAt > 0 {
 			cur, err := db.Execute("SELECT updated_at FROM invoices WHERE id=?", lib.Text(id))
 			if err == nil && len(cur.Rows) > 0 && lib.ToInt64(cur.Rows[0][0]) != body.BaseUpdatedAt {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusConflict)
-				json.NewEncoder(w).Encode(map[string]interface{}{"error": "conflict: record changed on another device", "currentUpdatedAt": lib.ToInt64(cur.Rows[0][0])})
+				lib.WriteConflict(w, lib.ToInt64(cur.Rows[0][0]))
 				return
 			}
 		}
@@ -83,9 +81,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		if v := r.URL.Query().Get("baseUpdatedAt"); v != "" {
 			if base, err := strconv.ParseInt(v, 10, 64); err == nil && base > 0 {
 				if cur, err := db.Execute("SELECT updated_at FROM invoices WHERE id=?", lib.Text(id)); err == nil && len(cur.Rows) > 0 && lib.ToInt64(cur.Rows[0][0]) != base {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusConflict)
-					json.NewEncoder(w).Encode(map[string]interface{}{"error": "conflict: record changed on another device", "currentUpdatedAt": lib.ToInt64(cur.Rows[0][0])})
+					lib.WriteConflict(w, lib.ToInt64(cur.Rows[0][0]))
 					return
 				}
 			}
@@ -241,7 +237,7 @@ func loadInvoice(db *lib.TursoClient, id string) (map[string]interface{}, error)
 	if len(custRes.Rows) > 0 {
 		custName = lib.ToString(custRes.Rows[0][0])
 		inv["customerName"] = custName
-		inv["customerPhone"] = nullableStr(custRes.Rows[0][1])
+		inv["customerPhone"] = lib.NullStr(custRes.Rows[0][1])
 	}
 	inv["totalAmount"] = lib.FormatMoney(lib.ParseMoney(lib.ToString(inv["totalAmount"])))
 
@@ -254,10 +250,10 @@ func loadInvoice(db *lib.TursoClient, id string) (map[string]interface{}, error)
 	items := []map[string]interface{}{}
 	for _, row := range itemRes.Rows {
 		items = append(items, map[string]interface{}{
-			"id": row[0], "productSku": row[1], "productName": nullableStr(row[2]),
+			"id": row[0], "productSku": row[1], "productName": lib.NullStr(row[2]),
 			"quantity": lib.ToInt(row[3]), "unitPrice": row[4], "vatRate": row[5],
 			"unitCost": row[6], "warrantyMonths": lib.ToInt(row[7]),
-			"descriptionOverride": nullableStr(row[8]), "warrantyEndDate": row[9],
+			"descriptionOverride": lib.NullStr(row[8]), "warrantyEndDate": row[9],
 			"createdAt": row[10],
 		})
 	}
@@ -273,7 +269,7 @@ func loadInvoice(db *lib.TursoClient, id string) (map[string]interface{}, error)
 		paid += amount
 		payments = append(payments, map[string]interface{}{
 			"id": row[0], "method": row[1], "amount": lib.FormatMoney(amount),
-			"reference": nullableStr(row[3]), "notes": nullableStr(row[4]), "createdAt": row[5],
+			"reference": lib.NullStr(row[3]), "notes": lib.NullStr(row[4]), "createdAt": row[5],
 		})
 	}
 	total := lib.ParseMoney(lib.ToString(inv["totalAmount"]))
@@ -292,9 +288,3 @@ type errText string
 
 func (e errText) Error() string { return string(e) }
 
-func nullableStr(v interface{}) string {
-	if v == nil {
-		return ""
-	}
-	return lib.ToString(v)
-}

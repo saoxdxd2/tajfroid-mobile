@@ -31,7 +31,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		for _, row := range res.Rows {
 			items = append(items, map[string]interface{}{
 				"id": row[0], "method": row[1], "amount": row[2],
-				"reference": nullableStr(row[3]), "notes": nullableStr(row[4]),
+				"reference": lib.NullStr(row[3]), "notes": lib.NullStr(row[4]),
 				"createdAt": row[5],
 			})
 		}
@@ -216,12 +216,6 @@ type errText string
 
 func (e errText) Error() string { return string(e) }
 
-func nullableStr(v interface{}) string {
-	if v == nil {
-		return ""
-	}
-	return lib.ToString(v)
-}
 
 func nullableText(s string) lib.TursoArg {
 	if s == "" {

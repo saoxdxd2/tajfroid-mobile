@@ -27,9 +27,9 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"id": row[0], "partyType": row[1], "companyName": row[2],
-			"firstName": nullableStr(row[3]), "lastName": nullableStr(row[4]),
-			"contactName": nullableStr(row[5]), "email": nullableStr(row[6]),
-			"phone": nullableStr(row[7]), "iceNumber": nullableStr(row[8]),
+			"firstName": lib.NullStr(row[3]), "lastName": lib.NullStr(row[4]),
+			"contactName": lib.NullStr(row[5]), "email": lib.NullStr(row[6]),
+			"phone": lib.NullStr(row[7]), "iceNumber": lib.NullStr(row[8]),
 			"isArchived": lib.ToInt(row[9]) == 1, "updatedAt": lib.ToInt64(row[10]),
 		})
 
@@ -50,9 +50,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			cur, err := db.Execute("SELECT updated_at FROM suppliers WHERE id=?", lib.Text(id))
 			if err == nil && len(cur.Rows) > 0 {
 				if lib.ToInt64(cur.Rows[0][0]) != body.BaseUpdatedAt {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusConflict)
-					json.NewEncoder(w).Encode(map[string]interface{}{"error": "conflict: record changed on another device", "currentUpdatedAt": lib.ToInt64(cur.Rows[0][0])})
+					lib.WriteConflict(w, lib.ToInt64(cur.Rows[0][0]))
 					return
 				}
 			}
@@ -90,9 +88,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		if v := r.URL.Query().Get("baseUpdatedAt"); v != "" {
 			if base, err := strconv.ParseInt(v, 10, 64); err == nil && base > 0 {
 				if cur, err := db.Execute("SELECT updated_at FROM suppliers WHERE id=?", lib.Text(id)); err == nil && len(cur.Rows) > 0 && lib.ToInt64(cur.Rows[0][0]) != base {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusConflict)
-					json.NewEncoder(w).Encode(map[string]interface{}{"error": "conflict: record changed on another device", "currentUpdatedAt": lib.ToInt64(cur.Rows[0][0])})
+					lib.WriteConflict(w, lib.ToInt64(cur.Rows[0][0]))
 					return
 				}
 			}
@@ -107,9 +103,3 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func nullableStr(v interface{}) string {
-	if v == nil {
-		return ""
-	}
-	return lib.ToString(v)
-}

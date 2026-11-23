@@ -27,9 +27,9 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		for _, row := range res.Rows {
 			items = append(items, map[string]interface{}{
 				"id": row[0], "partyType": row[1], "companyName": row[2],
-				"firstName": nullableStr(row[3]), "lastName": nullableStr(row[4]),
-				"contactName": nullableStr(row[5]), "email": nullableStr(row[6]),
-				"phone": nullableStr(row[7]), "iceNumber": nullableStr(row[8]),
+				"firstName": lib.NullStr(row[3]), "lastName": lib.NullStr(row[4]),
+				"contactName": lib.NullStr(row[5]), "email": lib.NullStr(row[6]),
+				"phone": lib.NullStr(row[7]), "iceNumber": lib.NullStr(row[8]),
 				"isArchived": lib.ToInt(row[9]) == 1, "createdAt": row[10], "updatedAt": row[11],
 			})
 		}
@@ -94,12 +94,6 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func nullableStr(v interface{}) string {
-	if v == nil {
-		return ""
-	}
-	return lib.ToString(v)
-}
 
 func nullableText(s string) lib.TursoArg {
 	if s == "" {

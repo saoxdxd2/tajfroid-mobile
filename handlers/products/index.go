@@ -26,14 +26,14 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			items = append(items, map[string]interface{}{
 				"sku":           row[0],
 				"name":          row[1],
-				"description":   nullableStr(row[2]),
+				"description":   lib.NullStr(row[2]),
 				"purchasePrice": row[3],
 				"salePrice":     row[4],
 				"vatRate":       row[5],
 				"stock":         lib.ToInt(row[6]),
 				"active":        lib.ToInt(row[7]) == 1,
-				"category":      nullableStr(row[8]),
-				"brand":         nullableStr(row[9]),
+				"category":      lib.NullStr(row[8]),
+				"brand":         lib.NullStr(row[9]),
 			})
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -91,12 +91,6 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func nullableStr(v interface{}) string {
-	if v == nil {
-		return ""
-	}
-	return lib.ToString(v)
-}
 
 func nullableText(s string) lib.TursoArg {
 	if s == "" {

@@ -41,11 +41,11 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			total := lib.ParseMoney(lib.ToString(row[5]))
 			items = append(items, map[string]interface{}{
 				"id": id, "invoiceNumber": lib.ToString(row[1]),
-				"customerId": lib.ToString(row[2]), "customerName": nullableStr(row[3]),
+				"customerId": lib.ToString(row[2]), "customerName": lib.NullStr(row[3]),
 				"state": lib.ToString(row[4]), "totalAmount": lib.FormatMoney(total),
 				"paidAmount": lib.FormatMoney(paid[id]),
 				"balance":    lib.FormatMoney(total - paid[id]),
-				"channel":    lib.ToString(row[6]), "dueDate": row[7], "notes": nullableStr(row[8]),
+				"channel":    lib.ToString(row[6]), "dueDate": row[7], "notes": lib.NullStr(row[8]),
 				"createdAt": row[9], "updatedAt": row[10],
 			})
 		}
@@ -182,12 +182,6 @@ func paidByInvoice(db *lib.TursoClient) map[string]int64 {
 	return out
 }
 
-func nullableStr(v interface{}) string {
-	if v == nil {
-		return ""
-	}
-	return lib.ToString(v)
-}
 
 func nullableText(s string) lib.TursoArg {
 	if strings.TrimSpace(s) == "" {

@@ -116,9 +116,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		if v := r.URL.Query().Get("baseUpdatedAt"); v != "" {
 			if base, err := strconv.ParseInt(v, 10, 64); err == nil && base > 0 {
 				if cur, err := db.Execute("SELECT updated_at FROM purchases WHERE id=?", lib.Text(purchaseID)); err == nil && len(cur.Rows) > 0 && lib.ToInt64(cur.Rows[0][0]) != base {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusConflict)
-					json.NewEncoder(w).Encode(map[string]interface{}{"error": "conflict: record changed on another device", "currentUpdatedAt": lib.ToInt64(cur.Rows[0][0])})
+					lib.WriteConflict(w, lib.ToInt64(cur.Rows[0][0]))
 					return
 				}
 			}
@@ -169,7 +167,7 @@ func listItems(db *lib.TursoClient, purchaseID string) ([]map[string]interface{}
 	items := []map[string]interface{}{}
 	for _, row := range res.Rows {
 		items = append(items, map[string]interface{}{
-			"id": row[0], "productSku": row[1], "productName": nullableStr(row[2]),
+			"id": row[0], "productSku": row[1], "productName": lib.NullStr(row[2]),
 			"quantity": lib.ToInt(row[3]), "unitCost": row[4], "createdAt": row[5],
 		})
 	}
@@ -191,12 +189,6 @@ func recalcTotal(db *lib.TursoClient, purchaseID string) (int64, error) {
 	return total, err
 }
 
-func nullableStr(v interface{}) string {
-	if v == nil {
-		return ""
-	}
-	return lib.ToString(v)
-}
 
 type errText string
 

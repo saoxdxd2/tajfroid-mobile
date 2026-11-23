@@ -4,7 +4,9 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"strconv"
 )
 
@@ -93,4 +95,35 @@ func ToInt64(v interface{}) int64 {
 	default:
 		return 0
 	}
+}
+
+func NullStr(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	s := ToString(v)
+	if s == "<nil>" {
+		return ""
+	}
+	return s
+}
+
+func NullIface(v interface{}) interface{} {
+	if v == nil {
+		return nil
+	}
+	return ToString(v)
+}
+
+func WriteJSON(w http.ResponseWriter, status int, v interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
+}
+
+func WriteConflict(w http.ResponseWriter, currentUpdatedAt int64) {
+	WriteJSON(w, http.StatusConflict, map[string]interface{}{
+		"error":            "conflict: record changed on another device",
+		"currentUpdatedAt": currentUpdatedAt,
+	})
 }

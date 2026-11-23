@@ -33,9 +33,9 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			items = append(items, map[string]interface{}{
 				"id": row[0], "checkNumber": row[1], "direction": row[2],
 				"status": row[3], "amount": row[4], "dueDate": row[5],
-				"bank": nullableStr(row[6]), "partyName": row[7],
-				"customerId": nullableStr(row[8]), "supplierId": nullableStr(row[9]),
-				"notes": nullableStr(row[10]), "createdAt": row[11], "updatedAt": row[12],
+				"bank": lib.NullStr(row[6]), "partyName": row[7],
+				"customerId": lib.NullStr(row[8]), "supplierId": lib.NullStr(row[9]),
+				"notes": lib.NullStr(row[10]), "createdAt": row[11], "updatedAt": row[12],
 			})
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -135,12 +135,6 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func nullableStr(v interface{}) string {
-	if v == nil {
-		return ""
-	}
-	return lib.ToString(v)
-}
 
 func nullableText(s string) lib.TursoArg {
 	if strings.TrimSpace(s) == "" {

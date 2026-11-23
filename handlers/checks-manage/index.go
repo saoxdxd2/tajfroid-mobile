@@ -35,9 +35,9 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"id": row[0], "checkNumber": row[1], "direction": row[2], "status": row[3],
-			"amount": row[4], "dueDate": row[5], "bank": nullableStr(row[6]),
-			"partyName": row[7], "customerId": nullableStr(row[8]), "supplierId": nullableStr(row[9]),
-			"notes": nullableStr(row[10]), "createdAt": row[11], "updatedAt": row[12],
+			"amount": row[4], "dueDate": row[5], "bank": lib.NullStr(row[6]),
+			"partyName": row[7], "customerId": lib.NullStr(row[8]), "supplierId": lib.NullStr(row[9]),
+			"notes": lib.NullStr(row[10]), "createdAt": row[11], "updatedAt": row[12],
 		})
 
 	case http.MethodPut:
@@ -53,9 +53,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		if body.BaseUpdatedAt > 0 {
 			cur, err := db.Execute("SELECT updated_at FROM checks WHERE id=?", lib.Text(id))
 			if err == nil && len(cur.Rows) > 0 && lib.ToInt64(cur.Rows[0][0]) != body.BaseUpdatedAt {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusConflict)
-				json.NewEncoder(w).Encode(map[string]interface{}{"error": "conflict: record changed on another device", "currentUpdatedAt": lib.ToInt64(cur.Rows[0][0])})
+				lib.WriteConflict(w, lib.ToInt64(cur.Rows[0][0]))
 				return
 			}
 		}
@@ -149,9 +147,3 @@ func paidForInvoice(db *lib.TursoClient, invoiceID string) (int64, error) {
 	return total, nil
 }
 
-func nullableStr(v interface{}) string {
-	if v == nil {
-		return ""
-	}
-	return lib.ToString(v)
-}

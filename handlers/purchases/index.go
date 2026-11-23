@@ -27,9 +27,9 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		for _, row := range res.Rows {
 			items = append(items, map[string]interface{}{
 				"id": row[0], "reference": row[1], "supplierId": row[2],
-				"supplierName": nullableStr(row[3]), "state": row[4],
+				"supplierName": lib.NullStr(row[3]), "state": row[4],
 				"totalAmount": row[5], "purchaseDate": row[6],
-				"supplierInvoiceNo": nullableStr(row[7]),
+				"supplierInvoiceNo": lib.NullStr(row[7]),
 				"createdAt": row[8], "updatedAt": row[9],
 			})
 		}
@@ -116,12 +116,6 @@ func nextPurchaseReference(db *lib.TursoClient) (string, error) {
 	return fmt.Sprintf("%s%02d", prefix, maxSeq+1), nil
 }
 
-func nullableStr(v interface{}) string {
-	if v == nil {
-		return ""
-	}
-	return lib.ToString(v)
-}
 
 func nullableText(s string) lib.TursoArg {
 	if strings.TrimSpace(s) == "" {

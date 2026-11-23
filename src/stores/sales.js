@@ -133,6 +133,11 @@ export const useSalesStore = defineStore('sales', () => {
       const res = await apiFetch('/api/invoices/items', {
         method: 'POST', headers: jsonHeaders(), body: JSON.stringify(body),
       })
+      if (res.status === 409) {
+        const d = await res.json().catch(()=>({}))
+        await useMutationStore().recordConflict({ method:'POST', path:'/api/invoices/items', body, entity:'invoice_item', entityId: body.id, conflict:d, error:d.error })
+        const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e
+      }
       if (!res.ok) throw new Error(await readError(res, 'Failed to add item'))
       await fetchInvoice(invoiceId)
       await fetchInvoices()
@@ -150,6 +155,11 @@ export const useSalesStore = defineStore('sales', () => {
     const path = `/api/invoices/items?id=${encodeURIComponent(itemId)}`
     try {
       const res = await apiFetch(path, { method: 'DELETE' })
+      if (res.status === 409) {
+        const d = await res.json().catch(()=>({}))
+        await useMutationStore().recordConflict({ method:'DELETE', path, body:null, entity:'invoice_item', entityId: itemId, conflict:d, error:d.error })
+        const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e
+      }
       if (!res.ok) throw new Error(await readError(res, 'Failed to remove item'))
     } catch (e) {
       if (!navigator.onLine || e instanceof TypeError) {

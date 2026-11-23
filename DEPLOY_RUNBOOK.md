@@ -19,7 +19,12 @@ npm run check:release
 Set `RELAY_HEALTH_URL=https://mobile.tajfroid.com/api/health` to include a live
 probe; it is skipped by default so local work stays offline.
 
-Current known gate: 4 local commits ahead of `origin/main`.
+Current known gate: 5 local commits ahead of `origin/main`.
+
+Live pre-deploy probe (2026-11-24, read-only):
+`GET https://mobile.tajfroid.com/api/health` → HTTP 500 with
+`{"error":"no results: {\"error\":\"JWT error: InvalidToken\"}","ok":false}`.
+This is the known token-rotation/deploy blocker; it is not fixed by local code.
 
 ## 2. Relay rollout (requires explicit approval)
 
@@ -64,9 +69,12 @@ appear in logs or metrics.
 
 ## 5. APK release (requires manual confirmation)
 
-See `C:\Users\user\tajfroid-apk\RELEASE.md` once the agent-prepared release
-script is present. Signing needs keystore/key passwords supplied through
-environment variables; never commit or print them.
+See `C:\Users\user\tajfroid-apk\RELEASE.md` and run
+`scripts/build-release.ps1 -VerifyManifestOnly` first. The current canonical
+web manifest drifts from the pinned TWA manifest on `background_color`
+(`#ffffff` vs `#1F3A5F`); resolve that before a reproducible signed rebuild.
+Signing needs keystore/key passwords supplied through environment variables;
+never commit or print them.
 
 Manual install on phone is still required. Confirm camera capture, encrypted
 upload, offline queue, and conflict UI inside the installed TWA.

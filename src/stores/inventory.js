@@ -70,7 +70,11 @@ export const useInventoryStore = defineStore('inventory', () => {
         headers: jsonHeaders(),
         body: JSON.stringify(body),
       })
-      if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e }
+      if (res.status === 409) {
+        const d = await res.json().catch(()=>({}))
+        await useMutationStore().recordConflict({ method:'PUT', path:`/api/products/manage?sku=${encodeURIComponent(sku)}`, body, entity:'product', entityId: sku, baseUpdatedAt: body.baseCatalogVersion, conflict:d, error:d.error })
+        const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e
+      }
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
         throw new Error(d.error || 'Failed to update product')

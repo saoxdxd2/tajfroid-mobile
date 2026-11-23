@@ -65,7 +65,11 @@ export const usePurchaseStore = defineStore('purchases', () => {
     const res = await apiFetch(`/api/purchases/manage?id=${encodeURIComponent(id)}`, {
       method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(payload),
     })
-    if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e }
+    if (res.status === 409) {
+      const d = await res.json().catch(()=>({}))
+      await useMutationStore().recordConflict({ method:'PUT', path:`/api/purchases/manage?id=${encodeURIComponent(id)}`, body: payload, entity:'purchase', entityId:id, baseUpdatedAt: payload.baseUpdatedAt, conflict:d, error:d.error })
+      const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e
+    }
     if (!res.ok) throw new Error(await readError(res, 'Failed to update purchase'))
     return res.json()
   }

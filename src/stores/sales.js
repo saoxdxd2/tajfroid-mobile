@@ -65,7 +65,11 @@ export const useSalesStore = defineStore('sales', () => {
     const res = await apiFetch(`/api/invoices/manage?id=${encodeURIComponent(id)}`, {
       method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(payload),
     })
-    if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e }
+    if (res.status === 409) {
+      const d = await res.json().catch(()=>({}))
+      await useMutationStore().recordConflict({ method:'PUT', path:`/api/invoices/manage?id=${encodeURIComponent(id)}`, body: payload, entity:'invoice', entityId:id, baseUpdatedAt: payload.baseUpdatedAt, conflict:d, error:d.error })
+      const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e
+    }
     if (!res.ok) throw new Error(await readError(res, 'Failed to update invoice'))
     return res.json()
   }
@@ -77,7 +81,11 @@ export const useSalesStore = defineStore('sales', () => {
       const res = await apiFetch(`/api/invoices/manage?id=${encodeURIComponent(id)}`, {
         method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(body),
       })
-      if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e }
+      if (res.status === 409) {
+        const d = await res.json().catch(()=>({}))
+        await useMutationStore().recordConflict({ method:'PUT', path:`/api/invoices/manage?id=${encodeURIComponent(id)}`, body, entity:'invoice', entityId:id, baseUpdatedAt: body.baseUpdatedAt, conflict:d, error:d.error })
+        const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e
+      }
       if (!res.ok) throw new Error(await readError(res, `Failed to ${name} invoice`))
     } catch (e) {
       if (!e.conflict && (!navigator.onLine || e instanceof TypeError)) {

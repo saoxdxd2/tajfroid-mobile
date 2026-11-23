@@ -178,11 +178,18 @@ export const useMutationStore = defineStore('mutations', () => {
     return item.id
   }
 
+  async function conflictFromResponse(res, { method, path, body, entity, entityId, baseUpdatedAt, fallback }) {
+    const d = await res.json().catch(() => ({}))
+    await recordConflict({ method, path, body, entity, entityId, baseUpdatedAt, conflict: d, error: d.error })
+    const e = new Error(d.error || fallback || 'Conflict')
+    e.conflict = true; e.current = d; throw e
+  }
+
   function statusCounts() {
     const c = { pending: 0, conflict: 0, applied: 0 }
     for (const x of items.value) c[x.status] = (c[x.status] || 0) + 1
     return c
   }
 
-  return { items, syncing, lastError, load, enqueue, flush, remove, retry, updateBody, recordConflict, statusCounts }
+  return { items, syncing, lastError, load, enqueue, flush, remove, retry, updateBody, recordConflict, conflictFromResponse, statusCounts }
 })

@@ -79,11 +79,7 @@ export const useInventoryStore = defineStore('inventory', () => {
         headers: jsonHeaders(),
         body: JSON.stringify(body),
       })
-      if (res.status === 409) {
-        const d = await res.json().catch(()=>({}))
-        await useMutationStore().recordConflict({ method:'PUT', path:`/api/products/manage?sku=${encodeURIComponent(sku)}`, body, entity:'product', entityId: sku, baseUpdatedAt: body.baseCatalogVersion, conflict:d, error:d.error })
-        const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e
-      }
+      if (res.status === 409) await useMutationStore().conflictFromResponse(res, { method:'PUT', path:`/api/products/manage?sku=${encodeURIComponent(sku)}`, body, entity:'product', entityId: sku, baseUpdatedAt: body.baseCatalogVersion, fallback: 'Conflict' })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
         throw new Error(d.error || 'Failed to update product')
@@ -102,11 +98,7 @@ export const useInventoryStore = defineStore('inventory', () => {
     const q = baseCatalogVersion ? `&baseCatalogVersion=${encodeURIComponent(baseCatalogVersion)}` : ''
     try {
       const res = await apiFetch(`/api/products/manage?sku=${encodeURIComponent(sku)}${q}`, { method: 'DELETE' })
-      if (res.status === 409) {
-        const d = await res.json().catch(()=>({}))
-        await useMutationStore().recordConflict({ method:'DELETE', path:`/api/products/manage?sku=${encodeURIComponent(sku)}${q}`, body:null, entity:'product', entityId: sku, baseUpdatedAt: baseCatalogVersion, conflict:d, error:d.error })
-        const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e
-      }
+      if (res.status === 409) await useMutationStore().conflictFromResponse(res, { method:'DELETE', path:`/api/products/manage?sku=${encodeURIComponent(sku)}${q}`, body:null, entity:'product', entityId: sku, baseUpdatedAt: baseCatalogVersion, fallback: 'Conflict' })
       if (!res.ok) throw new Error('Failed to archive product')
     } catch (e) {
       if (!e.conflict && (!navigator.onLine || e instanceof TypeError)) {
@@ -142,11 +134,7 @@ export const useInventoryStore = defineStore('inventory', () => {
     const q = baseUpdatedAt ? `&baseUpdatedAt=${encodeURIComponent(baseUpdatedAt)}` : ''
     try {
       const res = await apiFetch(`/api/categories/manage?id=${encodeURIComponent(id)}${q}`, { method: 'DELETE' })
-      if (res.status === 409) {
-        const d = await res.json().catch(()=>({}))
-        await useMutationStore().recordConflict({ method:'DELETE', path:`/api/categories/manage?id=${encodeURIComponent(id)}${q}`, body:null, entity:'category', entityId:id, baseUpdatedAt, conflict:d, error:d.error })
-        const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e
-      }
+      if (res.status === 409) await useMutationStore().conflictFromResponse(res, { method:'DELETE', path:`/api/categories/manage?id=${encodeURIComponent(id)}${q}`, body:null, entity:'category', entityId:id, baseUpdatedAt, fallback: 'Conflict' })
       if (!res.ok) throw new Error('Failed to delete category')
     } catch (e) {
       if (!e.conflict && (!navigator.onLine || e instanceof TypeError)) {
@@ -182,11 +170,7 @@ export const useInventoryStore = defineStore('inventory', () => {
     const q = baseUpdatedAt ? `&baseUpdatedAt=${encodeURIComponent(baseUpdatedAt)}` : ''
     try {
       const res = await apiFetch(`/api/brands/manage?id=${encodeURIComponent(id)}${q}`, { method: 'DELETE' })
-      if (res.status === 409) {
-        const d = await res.json().catch(()=>({}))
-        await useMutationStore().recordConflict({ method:'DELETE', path:`/api/brands/manage?id=${encodeURIComponent(id)}${q}`, body:null, entity:'brand', entityId:id, baseUpdatedAt, conflict:d, error:d.error })
-        const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e
-      }
+      if (res.status === 409) await useMutationStore().conflictFromResponse(res, { method:'DELETE', path:`/api/brands/manage?id=${encodeURIComponent(id)}${q}`, body:null, entity:'brand', entityId:id, baseUpdatedAt, fallback: 'Conflict' })
       if (!res.ok) throw new Error('Failed to delete brand')
     } catch (e) {
       if (!e.conflict && (!navigator.onLine || e instanceof TypeError)) {
@@ -207,11 +191,7 @@ export const useInventoryStore = defineStore('inventory', () => {
         headers: jsonHeaders(),
         body: JSON.stringify(body),
       })
-      if (res.status === 409) {
-        const d = await res.json().catch(()=>({}))
-        await useMutationStore().recordConflict({ method:'POST', path:'/api/stock', body, entity:'stock', entityId: sku, baseUpdatedAt: baseStock, conflict:d, error:d.error })
-        const e = new Error(d.error||'Conflict: stock changed'); e.conflict=true; e.current=d; throw e
-      }
+      if (res.status === 409) await useMutationStore().conflictFromResponse(res, { method:'POST', path:'/api/stock', body, entity:'stock', entityId: sku, baseUpdatedAt: baseStock, fallback: 'Conflict: stock changed' })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
         throw new Error(d.error || 'Failed to adjust stock')

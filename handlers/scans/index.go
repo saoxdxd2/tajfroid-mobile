@@ -32,8 +32,16 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		}
 		ident, _ := lib.Authenticate(r)
 		deviceID := ident.ID
-		if deviceID == "" {
-			deviceID = "dev-device"
+		if ident.Kind == "device" && deviceID != "" {
+			// ok
+		} else {
+			// Agent or unknown caller: attribute to a synthetic device row so the
+			// scans.device_id FK is satisfied.
+			deviceID = "desktop-agent"
+			now := time.Now().Unix()
+			db.Execute(`INSERT INTO devices (id, device_token_hash, name, paired_at, created_at)
+				VALUES (?,?,?,?,?) ON CONFLICT(id) DO NOTHING`,
+				lib.Text(deviceID), lib.Text("agent"), lib.Text("Desktop agent"), lib.Int(now), lib.Int(now))
 		}
 		res, _ := db.Execute("SELECT id, status FROM scans WHERE client_id = ? LIMIT 1", lib.Text(body.ClientID))
 		if len(res.Rows) > 0 {

@@ -49,10 +49,13 @@ export const useFinanceStore = defineStore('finance', () => {
     return res.json()
   }
 
-  async function setCheckStatus(id, status) {
+  async function setCheckStatus(id, status, baseUpdatedAt) {
+    const payload = { status }
+    if (baseUpdatedAt) payload.baseUpdatedAt = baseUpdatedAt
     const res = await apiFetch(`/api/checks/manage?id=${encodeURIComponent(id)}`, {
-      method: 'PUT', headers: jsonHeaders(), body: JSON.stringify({ status }),
+      method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(payload),
     })
+    if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e }
     if (!res.ok) throw new Error(await readError(res, 'Failed to update check'))
     await fetchChecks()
     await fetchSummary()
@@ -81,7 +84,7 @@ export const useFinanceStore = defineStore('finance', () => {
 
   async function archiveExpense(id) {
     const res = await apiFetch(`/api/expenses/manage?id=${encodeURIComponent(id)}`, {
-      method: 'DELETE', headers: authHeaders(),
+      method: 'DELETE',
     })
     if (!res.ok) throw new Error(await readError(res, 'Failed to archive expense'))
     await fetchExpenses()

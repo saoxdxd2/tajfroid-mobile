@@ -40,6 +40,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var body struct {
+			ID        string `json:"id"` // optional client-supplied idempotency key (UUID)
 			InvoiceID string `json:"invoiceId"`
 			Method    string `json:"method"`
 			Amount    string `json:"amount"`
@@ -48,6 +49,15 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			Notes     string `json:"notes"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
+		if body.ID != "" {
+			// Idempotent replay: if this payment already exists, return it.
+			ex, err := db.Execute("SELECT id, amount FROM payments WHERE id = ?", lib.Text(body.ID))
+			if err == nil && len(ex.Rows) > 0 {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{"id": body.ID, "idempotent": true, "amount": ex.Rows[0][1]})
+				return
+			}
+		}
 		if body.InvoiceID == "" {
 			http.Error(w, "invoiceId required", http.StatusBadRequest)
 			return
@@ -100,7 +110,10 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		id := lib.NewID()
+		id := body.ID
+		if id == "" {
+			id = lib.NewID()
+		}
 		now := time.Now().Unix()
 		_, err = db.Execute(`INSERT INTO payments
 			(id, invoice_id, method, amount, check_id, reference, notes, created_at, updated_at)

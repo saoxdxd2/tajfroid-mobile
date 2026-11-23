@@ -54,6 +54,7 @@ export const useSalesStore = defineStore('sales', () => {
     const res = await apiFetch(`/api/invoices/manage?id=${encodeURIComponent(id)}`, {
       method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(payload),
     })
+    if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e }
     if (!res.ok) throw new Error(await readError(res, 'Failed to update invoice'))
     return res.json()
   }
@@ -91,8 +92,10 @@ export const useSalesStore = defineStore('sales', () => {
   }
 
   async function pay(payload) {
+    const body = { ...payload }
+    if (!body.id) body.id = crypto.randomUUID() // idempotency key for offline replay/retry
     const res = await apiFetch('/api/payments', {
-      method: 'POST', headers: jsonHeaders(), body: JSON.stringify(payload),
+      method: 'POST', headers: jsonHeaders(), body: JSON.stringify(body),
     })
     if (!res.ok) throw new Error(await readError(res, 'Failed to register payment'))
     await fetchInvoice(payload.invoiceId)

@@ -54,6 +54,7 @@ export const usePurchaseStore = defineStore('purchases', () => {
     const res = await apiFetch(`/api/purchases/manage?id=${encodeURIComponent(id)}`, {
       method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(payload),
     })
+    if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e }
     if (!res.ok) throw new Error(await readError(res, 'Failed to update purchase'))
     return res.json()
   }
@@ -66,7 +67,7 @@ export const usePurchaseStore = defineStore('purchases', () => {
 
   async function remove(id) {
     const res = await apiFetch(`/api/purchases/manage?id=${encodeURIComponent(id)}`, {
-      method: 'DELETE', headers: authHeaders(),
+      method: 'DELETE',
     })
     if (!res.ok) throw new Error(await readError(res, 'Failed to delete purchase'))
     await fetchAll()
@@ -84,7 +85,7 @@ export const usePurchaseStore = defineStore('purchases', () => {
 
   async function removeItem(purchaseId, itemId) {
     const res = await apiFetch(`/api/purchases/items?id=${encodeURIComponent(itemId)}`, {
-      method: 'DELETE', headers: authHeaders(),
+      method: 'DELETE',
     })
     if (!res.ok) throw new Error(await readError(res, 'Failed to remove item'))
     await fetchOne(purchaseId)

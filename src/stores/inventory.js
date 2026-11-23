@@ -63,8 +63,9 @@ export const useInventoryStore = defineStore('inventory', () => {
     const res = await apiFetch(`/api/products/manage?sku=${encodeURIComponent(sku)}`, {
       method: 'PUT',
       headers: jsonHeaders(),
-      body: JSON.stringify(payload),
+      body: JSON.stringify(updates),
     })
+    if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e }
     if (!res.ok) {
       const d = await res.json().catch(() => ({}))
       throw new Error(d.error || 'Failed to update product')

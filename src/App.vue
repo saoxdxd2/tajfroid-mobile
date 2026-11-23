@@ -16,6 +16,25 @@
   </div>
 </template>
 
+<script setup>
+import { onMounted } from 'vue'
+import { useMutationStore } from './stores/mutations'
+import { useQueueStore } from './stores/queue'
+
+const mutations = useMutationStore()
+const scans = useQueueStore()
+
+onMounted(async () => {
+  await Promise.all([mutations.load(), scans.load()])
+  mutations.flush().catch(() => {})
+  scans.flush().catch(() => {})
+  window.addEventListener('online', () => {
+    mutations.flush().catch(() => {})
+    scans.flush().catch(() => {})
+  })
+})
+</script>
+
 <style scoped>
 main { padding-bottom: 150px; }
 </style>

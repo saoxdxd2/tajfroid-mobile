@@ -17,7 +17,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		res, err := db.Execute("SELECT id, party_type, company_name, first_name, last_name, contact_name, email, phone, ice_number, is_archived FROM customers WHERE id = ?", lib.Text(id))
+		res, err := db.Execute("SELECT id, party_type, company_name, first_name, last_name, contact_name, email, phone, ice_number, is_archived, updated_at FROM customers WHERE id = ?", lib.Text(id))
 		if err != nil || len(res.Rows) == 0 {
 			http.Error(w, "customer not found", http.StatusNotFound)
 			return
@@ -29,21 +29,35 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			"firstName": nullableStr(row[3]), "lastName": nullableStr(row[4]),
 			"contactName": nullableStr(row[5]), "email": nullableStr(row[6]),
 			"phone": nullableStr(row[7]), "iceNumber": nullableStr(row[8]),
-			"isArchived": lib.ToInt(row[9]) == 1,
+			"isArchived": lib.ToInt(row[9]) == 1, "updatedAt": lib.ToInt64(row[10]),
 		})
 
 	case http.MethodPut:
 		var body struct {
-			PartyType   string `json:"partyType"`
-			CompanyName string `json:"companyName"`
-			FirstName   string `json:"firstName"`
-			LastName    string `json:"lastName"`
-			ContactName string `json:"contactName"`
-			Email       string `json:"email"`
-			Phone       string `json:"phone"`
-			IceNumber   string `json:"iceNumber"`
+			PartyType     string `json:"partyType"`
+			CompanyName   string `json:"companyName"`
+			FirstName     string `json:"firstName"`
+			LastName      string `json:"lastName"`
+			ContactName   string `json:"contactName"`
+			Email         string `json:"email"`
+			Phone         string `json:"phone"`
+			IceNumber     string `json:"iceNumber"`
+			BaseUpdatedAt int64  `json:"baseUpdatedAt"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
+		// Optimistic concurrency: if client sent the version it edited, reject
+		// stale writes so the user can merge instead of silently overwriting.
+		if body.BaseUpdatedAt > 0 {
+			cur, err := db.Execute("SELECT updated_at FROM customers WHERE id=?", lib.Text(id))
+			if err == nil && len(cur.Rows) > 0 {
+				if lib.ToInt64(cur.Rows[0][0]) != body.BaseUpdatedAt {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusConflict)
+					json.NewEncoder(w).Encode(map[string]interface{}{"error": "conflict: record changed on another device", "currentUpdatedAt": lib.ToInt64(cur.Rows[0][0])})
+					return
+				}
+			}
+		}
 		now := time.Now().Unix()
 		if body.CompanyName != "" {
 			db.Execute("UPDATE customers SET company_name=? WHERE id=?", lib.Text(body.CompanyName), lib.Text(id))

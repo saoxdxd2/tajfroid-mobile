@@ -71,10 +71,21 @@ export const useSalesStore = defineStore('sales', () => {
   }
 
   async function action(id, name) {
-    const res = await apiFetch(`/api/invoices/manage?id=${encodeURIComponent(id)}`, {
-      method: 'PUT', headers: jsonHeaders(), body: JSON.stringify({ action: name }),
-    })
-    if (!res.ok) throw new Error(await readError(res, `Failed to ${name} invoice`))
+    const body = { action: name }
+    if (current.value?.id === id && current.value?.updatedAt) body.baseUpdatedAt = current.value.updatedAt
+    try {
+      const res = await apiFetch(`/api/invoices/manage?id=${encodeURIComponent(id)}`, {
+        method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(body),
+      })
+      if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e }
+      if (!res.ok) throw new Error(await readError(res, `Failed to ${name} invoice`))
+    } catch (e) {
+      if (!e.conflict && (!navigator.onLine || e instanceof TypeError)) {
+        await useMutationStore().enqueue({ method: 'PUT', path: `/api/invoices/manage?id=${encodeURIComponent(id)}`, body, entity: 'invoice', entityId: id, baseUpdatedAt: body.baseUpdatedAt })
+        return
+      }
+      throw e
+    }
     await fetchInvoice(id)
     await fetchInvoices()
   }
@@ -106,8 +117,17 @@ export const useSalesStore = defineStore('sales', () => {
   }
 
   async function removeItem(invoiceId, itemId) {
-    const res = await apiFetch(`/api/invoices/items?id=${encodeURIComponent(itemId)}`, { method: 'DELETE' })
-    if (!res.ok) throw new Error(await readError(res, 'Failed to remove item'))
+    const path = `/api/invoices/items?id=${encodeURIComponent(itemId)}`
+    try {
+      const res = await apiFetch(path, { method: 'DELETE' })
+      if (!res.ok) throw new Error(await readError(res, 'Failed to remove item'))
+    } catch (e) {
+      if (!navigator.onLine || e instanceof TypeError) {
+        await useMutationStore().enqueue({ method: 'DELETE', path, body: null, entity: 'invoice_item', entityId: itemId })
+        return
+      }
+      throw e
+    }
     await fetchInvoice(invoiceId)
     await fetchInvoices()
   }

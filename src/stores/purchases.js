@@ -71,7 +71,9 @@ export const usePurchaseStore = defineStore('purchases', () => {
   }
 
   async function validate(id) {
-    await update(id, { action: 'validate' })
+    const body = { action: 'validate' }
+    if (current.value?.id === id && current.value?.updatedAt) body.baseUpdatedAt = current.value.updatedAt
+    await update(id, body)
     await fetchOne(id)
     await fetchAll()
   }
@@ -105,10 +107,17 @@ export const usePurchaseStore = defineStore('purchases', () => {
   }
 
   async function removeItem(purchaseId, itemId) {
-    const res = await apiFetch(`/api/purchases/items?id=${encodeURIComponent(itemId)}`, {
-      method: 'DELETE',
-    })
-    if (!res.ok) throw new Error(await readError(res, 'Failed to remove item'))
+    const path = `/api/purchases/items?id=${encodeURIComponent(itemId)}`
+    try {
+      const res = await apiFetch(path, { method: 'DELETE' })
+      if (!res.ok) throw new Error(await readError(res, 'Failed to remove item'))
+    } catch (e) {
+      if (!navigator.onLine || e instanceof TypeError) {
+        await useMutationStore().enqueue({ method: 'DELETE', path, body: null, entity: 'purchase_item', entityId: itemId })
+        return
+      }
+      throw e
+    }
     await fetchOne(purchaseId)
     await fetchAll()
   }

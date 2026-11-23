@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiFetch, jsonHeaders, readError } from '../lib/api'
+import { useMutationStore } from './mutations'
 
 export const useSupplierStore = defineStore('suppliers', () => {
   const suppliers = ref([])
@@ -23,13 +24,22 @@ export const useSupplierStore = defineStore('suppliers', () => {
   }
 
   async function create(supplier) {
-    const res = await apiFetch('/api/suppliers', {
-      method: 'POST',
-      headers: jsonHeaders(),
-      body: JSON.stringify(supplier),
-    })
-    if (!res.ok) {
-      throw new Error(await readError(res, 'Failed to create supplier'))
+    const body = { ...supplier }
+    if (!body.id) body.id = crypto.randomUUID()
+    try {
+      const res = await apiFetch('/api/suppliers', {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error(await readError(res, 'Failed to create supplier'))
+    } catch (e) {
+      if (!navigator.onLine || e instanceof TypeError) {
+        await useMutationStore().enqueue({ method: 'POST', path: '/api/suppliers', body, entity: 'supplier', entityId: body.id })
+        suppliers.value.unshift({ ...body, _pending: true })
+        return
+      }
+      throw e
     }
     await fetchAll()
   }

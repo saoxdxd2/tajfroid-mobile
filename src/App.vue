@@ -3,6 +3,7 @@
     <main>
       <router-view />
     </main>
+    <MutationStatus />
     <nav class="bottom-nav">
       <router-link to="/catalog">Catalog</router-link>
       <router-link to="/inventory">Inventory</router-link>
@@ -18,6 +19,7 @@
 
 <script setup>
 import { onMounted } from 'vue'
+import MutationStatus from './components/MutationStatus.vue'
 import { useMutationStore } from './stores/mutations'
 import { useQueueStore } from './stores/queue'
 

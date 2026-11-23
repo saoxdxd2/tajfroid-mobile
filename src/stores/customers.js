@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiFetch, jsonHeaders, readError } from '../lib/api'
+import { useMutationStore } from './mutations'
 
 export const useCustomerStore = defineStore('customers', () => {
   const customers = ref([])
@@ -23,13 +24,22 @@ export const useCustomerStore = defineStore('customers', () => {
   }
 
   async function create(customer) {
-    const res = await apiFetch('/api/customers', {
-      method: 'POST',
-      headers: jsonHeaders(),
-      body: JSON.stringify(customer),
-    })
-    if (!res.ok) {
-      throw new Error(await readError(res, 'Failed to create customer'))
+    const body = { ...customer }
+    if (!body.id) body.id = crypto.randomUUID()
+    try {
+      const res = await apiFetch('/api/customers', {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error(await readError(res, 'Failed to create customer'))
+    } catch (e) {
+      if (!navigator.onLine || e instanceof TypeError) {
+        await useMutationStore().enqueue({ method: 'POST', path: '/api/customers', body, entity: 'customer', entityId: body.id })
+        customers.value.unshift({ ...body, _pending: true })
+        return
+      }
+      throw e
     }
     await fetchAll()
   }

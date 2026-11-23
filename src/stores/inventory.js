@@ -201,19 +201,27 @@ export const useInventoryStore = defineStore('inventory', () => {
   async function adjustStock(sku, change, baseStock) {
     const body = { sku, change }
     if (baseStock !== undefined && baseStock !== null) body.baseStock = baseStock
-    const res = await apiFetch('/api/stock', {
-      method: 'POST',
-      headers: jsonHeaders(),
-      body: JSON.stringify(body),
-    })
-    if (res.status === 409) {
-      const d = await res.json().catch(()=>({}))
-      await useMutationStore().recordConflict({ method:'POST', path:'/api/stock', body, entity:'stock', entityId: sku, baseUpdatedAt: baseStock, conflict:d, error:d.error })
-      const e = new Error(d.error||'Conflict: stock changed'); e.conflict=true; e.current=d; throw e
-    }
-    if (!res.ok) {
-      const d = await res.json().catch(() => ({}))
-      throw new Error(d.error || 'Failed to adjust stock')
+    try {
+      const res = await apiFetch('/api/stock', {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify(body),
+      })
+      if (res.status === 409) {
+        const d = await res.json().catch(()=>({}))
+        await useMutationStore().recordConflict({ method:'POST', path:'/api/stock', body, entity:'stock', entityId: sku, baseUpdatedAt: baseStock, conflict:d, error:d.error })
+        const e = new Error(d.error||'Conflict: stock changed'); e.conflict=true; e.current=d; throw e
+      }
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        throw new Error(d.error || 'Failed to adjust stock')
+      }
+    } catch (e) {
+      if (!e.conflict && (!navigator.onLine || e instanceof TypeError)) {
+        await useMutationStore().enqueue({ method:'POST', path:'/api/stock', body, entity:'stock', entityId: sku, baseUpdatedAt: baseStock })
+        return
+      }
+      throw e
     }
     await fetchProducts()
   }

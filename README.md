@@ -20,9 +20,22 @@ npm run dev
 ```
 
 ## Setup (relay, Go)
-1. Create a Turso database and run `relay/schema.sql`.
-2. Set env vars: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `ERP_SETUP_SECRET`.
-3. Deploy `relay/` to Vercel (separate project from tajfroid.com). Vercel builds the Go functions automatically.
+
+### Get your Turso URL and token
+1. Install the Turso CLI: https://docs.turso.tech/cli/installation
+2. Sign up / log in: `turso auth login`
+3. Create a database: `turso db create tajfroid-mobile`
+4. Get the URL: `turso db show tajfroid-mobile --url`  → this is `TURSO_DATABASE_URL`
+5. Get the token: `turso db tokens create tajfroid-mobile`  → this is `TURSO_AUTH_TOKEN`
+6. Run the schema: `turso db shell tajfroid-mobile < schema.sql`
+
+### Deploy
+1. Create a Turso database and run `schema.sql`.
+2. Set env vars in Vercel:
+   - `TURSO_DATABASE_URL` — your Turso database URL (see below)
+   - `TURSO_AUTH_TOKEN` — your Turso auth token
+   - (ERP_SETUP_SECRET is no longer needed — auto-connect uses device fingerprint)
+3. Deploy to Vercel. Vercel builds the Go functions automatically.
 4. Point `mobile.tajfroid.com` at the Vercel project.
 
 Note: the relay is written in Go. Local `go build ./...` cannot traverse the

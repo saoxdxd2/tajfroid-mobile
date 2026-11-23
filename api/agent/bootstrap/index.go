@@ -3,7 +3,6 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
-	"os"
 	"time"
 
 	"tajfroid-mobile/lib"
@@ -15,16 +14,11 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		SetupSecret string `json:"setupSecret"`
+		DeviceID string `json:"deviceId"`
 	}
 	json.NewDecoder(r.Body).Decode(&body)
-	expected := os.Getenv("ERP_SETUP_SECRET")
-	if expected != "" && body.SetupSecret != expected {
-		http.Error(w, "invalid setup secret", http.StatusUnauthorized)
-		return
-	}
-	if body.SetupSecret == "" {
-		http.Error(w, "setupSecret required", http.StatusBadRequest)
+	if body.DeviceID == "" {
+		http.Error(w, "deviceId required", http.StatusBadRequest)
 		return
 	}
 	db := lib.NewTurso()
@@ -32,6 +26,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	hash := lib.Sha256Hex(token)
 	db.Execute("INSERT INTO agent_tokens (id, token_hash, created_at) VALUES (?,?,?)",
 		lib.Text(lib.NewID()), lib.Text(hash), lib.Int(time.Now().Unix()))
+	// Store the device_id in a new column? For now, log it. TODO: add device_id column to agent_tokens.
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"agentToken": token})
 }

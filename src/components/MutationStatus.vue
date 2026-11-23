@@ -23,14 +23,16 @@
           <div class="actions"><button @click="useServerPaste(m)">Use pasted server JSON</button></div>
         </details>
         <div v-if="server[m.id]" class="diff">
-          <div class="diff-head"><strong>Field</strong><strong>Local</strong><strong>Server</strong><strong>Use</strong></div>
+          <div class="diff-head"><strong>Field</strong><strong>Local</strong><strong>Server</strong><strong>Conflict</strong><strong>Use</strong></div>
           <div v-for="k in diffKeys(m)" :key="k" class="diff-row">
             <span class="k">{{ k }}</span>
             <span class="v">{{ pretty(safeObj(edits[m.id])[k]) }}</span>
             <span class="v">{{ pretty(server[m.id][k]) }}</span>
+            <span class="v">{{ pretty(conflictObj[m.id]?.[k]) }}</span>
             <span class="pick">
-              <label><input type="radio" :name="m.id+k" :checked="(mergeSel[m.id]||{})[k]!=='server'" @change="choose(m.id,k,'local')">L</label>
-              <label><input type="radio" :name="m.id+k" :checked="(mergeSel[m.id]||{})[k]==='server'" @change="choose(m.id,k,'server')">S</label>
+              <label><input type="radio" :name="m.id+k" :checked="pickOf(m,k)==='local'" @change="choose(m.id,k,'local')">L</label>
+              <label><input type="radio" :name="m.id+k" :checked="pickOf(m,k)==='server'" @change="choose(m.id,k,'server')">S</label>
+              <label v-if="hasConflict(m,k)"><input type="radio" :name="m.id+k" :checked="pickOf(m,k)==='conflict'" @change="choose(m.id,k,'conflict')">C</label>
             </span>
           </div>
           <div class="actions"><button @click="applyMerge(m)">Apply merged payload</button></div>
@@ -65,6 +67,7 @@ const store = useMutationStore()
 const open = ref(false)
 const edits = reactive({})
 const server = reactive({})
+const conflictObj = reactive({})
 const mergeSel = reactive({})
 const serverPaste = reactive({})
 const items = computed(() => store.items)
@@ -115,14 +118,14 @@ function seedServerFromConflict(m) {
   const candidate = c.current || c.record || c.server || c.currentRecord || c
   if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
     const keys = Object.keys(candidate).filter(k => k !== 'error')
-    if (keys.length) { server[m.id] = candidate; return true }
+    if (keys.length) { server[m.id] = candidate; conflictObj[m.id] = candidate; return true }
   }
   return false
 }
 async function fetchServer(m) {
   if (seedServerFromConflict(m)) {
     mergeSel[m.id] = mergeSel[m.id] || {}
-    for (const k of diffKeys(m)) mergeSel[m.id][k] = mergeSel[m.id][k] || 'local'
+    for (const k of diffKeys(m)) mergeSel[m.id][k] = mergeSel[m.id][k] || undefined
     return
   }
   const p = readPathFor(m)
@@ -131,28 +134,44 @@ async function fetchServer(m) {
     const res = await apiFetch(p)
     if (!res.ok) throw new Error(await res.text())
     server[m.id] = await res.json()
+    if (!conflictObj[m.id]) conflictObj[m.id] = {}
     mergeSel[m.id] = mergeSel[m.id] || {}
-    for (const k of diffKeys(m)) mergeSel[m.id][k] = mergeSel[m.id][k] || 'local'
+    for (const k of diffKeys(m)) mergeSel[m.id][k] = mergeSel[m.id][k] || undefined
   } catch (e) { alert('Failed to load server: ' + e.message) }
 }
 function safeObj(s) { try { return JSON.parse(s||'{}') } catch { return {} } }
+function hasConflict(m,k) { const c = conflictObj[m.id]; return !!(c && Object.prototype.hasOwnProperty.call(c, k)) }
+function pickOf(m,k) { const sel = mergeSel[m.id]; if (sel && sel[k]) return sel[k]; return autoPick(m,k) }
+function autoPick(m,k) {
+  const l = safeObj(edits[m.id])[k]; const s = server[m.id]?.[k]; const c = conflictObj[m.id]?.[k]
+  if (hasConflict(m,k)) {
+    if (l === s) return 'server'
+    if (c === s && l !== s) return 'conflict'
+    return 'local'
+  }
+  if (l === s) return 'server'
+  return 'local'
+}
 function diffKeys(m) {
-  const l = safeObj(edits[m.id]); const s = server[m.id] || {}
-  return Array.from(new Set([...Object.keys(l), ...Object.keys(s)])).filter(k => ['string','number','boolean','object'].includes(typeof l[k]) || ['string','number','boolean','object'].includes(typeof s[k]))
+  const l = safeObj(edits[m.id]); const s = server[m.id] || {}; const c = conflictObj[m.id] || {}
+  return Array.from(new Set([...Object.keys(l), ...Object.keys(s), ...Object.keys(c)])).filter(k => ['string','number','boolean','object'].includes(typeof l[k]) || ['string','number','boolean','object'].includes(typeof s[k]) || ['string','number','boolean','object'].includes(typeof c[k]))
 }
 function choose(id,k,side) { mergeSel[id] = mergeSel[id] || {}; mergeSel[id][k] = side }
 function useServerPaste(m) {
   try {
     server[m.id] = JSON.parse(serverPaste[m.id] || '{}')
-    const local = safeObj(edits[m.id]); const s = server[m.id] || {}
+    if (!conflictObj[m.id]) conflictObj[m.id] = {}
     mergeSel[m.id] = mergeSel[m.id] || {}
-    for (const k of diffKeys(m)) mergeSel[m.id][k] = mergeSel[m.id][k] || 'local'
+    for (const k of diffKeys(m)) mergeSel[m.id][k] = mergeSel[m.id][k] || undefined
   } catch (e) { alert('Invalid JSON: ' + e.message) }
 }
 async function applyMerge(m) {
-  const l = safeObj(edits[m.id]); const s = server[m.id] || {}; const sel = mergeSel[m.id] || {}
+  const l = safeObj(edits[m.id]); const s = server[m.id] || {}; const c = conflictObj[m.id] || {}
   const out = { ...l }
-  for (const k of diffKeys(m)) out[k] = sel[k] === 'server' ? s[k] : l[k]
+  for (const k of diffKeys(m)) {
+    const pick = pickOf(m,k)
+    out[k] = pick === 'server' ? s[k] : pick === 'conflict' ? c[k] : l[k]
+  }
   edits[m.id] = pretty(out)
   await savePayload(m.id)
 }

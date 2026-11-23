@@ -217,7 +217,7 @@ async function act(name) {
 async function archive() {
   if (!confirm('Archive this invoice?')) return
   try {
-    await store.archive(route.params.id)
+    await store.archive(route.params.id, invoice.value?.updatedAt)
     window.location.href = '/sales'
   } catch (e) {
     actionMsg.value = e.message

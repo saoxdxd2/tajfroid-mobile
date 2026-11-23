@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,6 +70,16 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "purchase": purchase})
 
 	case http.MethodDelete:
+		if v := r.URL.Query().Get("baseUpdatedAt"); v != "" {
+			if base, err := strconv.ParseInt(v, 10, 64); err == nil && base > 0 {
+				if cur, err := db.Execute("SELECT updated_at FROM purchases WHERE id=?", lib.Text(id)); err == nil && len(cur.Rows) > 0 && lib.ToInt64(cur.Rows[0][0]) != base {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusConflict)
+					json.NewEncoder(w).Encode(map[string]interface{}{"error": "conflict: record changed on another device", "currentUpdatedAt": lib.ToInt64(cur.Rows[0][0])})
+					return
+				}
+			}
+		}
 		state, err := purchaseState(db, id)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)

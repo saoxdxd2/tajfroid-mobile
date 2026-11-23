@@ -28,13 +28,23 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPut:
 		var body struct {
-			Action     string `json:"action"`
-			CustomerID string `json:"customerId"`
-			Channel    string `json:"channel"`
-			DueDate    int64  `json:"dueDate"`
-			Notes      string `json:"notes"`
+			Action        string `json:"action"`
+			CustomerID    string `json:"customerId"`
+			Channel       string `json:"channel"`
+			DueDate       int64  `json:"dueDate"`
+			Notes         string `json:"notes"`
+			BaseUpdatedAt int64  `json:"baseUpdatedAt"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
+		if body.BaseUpdatedAt > 0 {
+			cur, err := db.Execute("SELECT updated_at FROM invoices WHERE id=?", lib.Text(id))
+			if err == nil && len(cur.Rows) > 0 && lib.ToInt64(cur.Rows[0][0]) != body.BaseUpdatedAt {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusConflict)
+				json.NewEncoder(w).Encode(map[string]interface{}{"error": "conflict: record changed on another device", "currentUpdatedAt": lib.ToInt64(cur.Rows[0][0])})
+				return
+			}
+		}
 		switch body.Action {
 		case "":
 			if err := updateInvoiceFields(db, id, body.CustomerID, body.Channel, body.DueDate, body.Notes); err != nil {

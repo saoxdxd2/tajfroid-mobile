@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"tajfroid-mobile/lib"
@@ -17,6 +18,17 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodDelete:
+		if v := r.URL.Query().Get("baseUpdatedAt"); v != "" {
+			if base, err := strconv.ParseInt(v, 10, 64); err == nil && base > 0 {
+				cur, err := db.Execute("SELECT updated_at FROM expenses WHERE id=?", lib.Text(id))
+				if err == nil && len(cur.Rows) > 0 && lib.ToInt64(cur.Rows[0][0]) != base {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusConflict)
+					json.NewEncoder(w).Encode(map[string]interface{}{"error": "conflict: record changed on another device", "currentUpdatedAt": lib.ToInt64(cur.Rows[0][0])})
+					return
+				}
+			}
+		}
 		now := time.Now().Unix()
 		if _, err := db.Execute("UPDATE expenses SET is_archived=1, updated_at=? WHERE id=?", lib.Int(now), lib.Text(id)); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)

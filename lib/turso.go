@@ -117,7 +117,9 @@ func (c *TursoClient) Execute(sql string, args ...TursoArg) (TursoResult, error)
 		if tr.Results[0].Error != nil {
 			return TursoResult{}, fmt.Errorf("sql error: %s", tr.Results[0].Error.Message)
 		}
-		return tr.Results[0].Response.Result, nil
+		res := tr.Results[0].Response.Result
+		normalizeResult(&res)
+		return res, nil
 	}
 	return TursoResult{}, lastErr
 }
@@ -128,6 +130,15 @@ func isRetryable(err error) bool {
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "EOF") || strings.Contains(msg, "connection reset") || strings.Contains(msg, "broken pipe")
+}
+
+func normalizeResult(res *TursoResult) {
+	for i, row := range res.Rows {
+		for j, v := range row {
+			row[j] = Unwrap(v)
+		}
+		res.Rows[i] = row
+	}
 }
 
 func Text(v string) TursoArg { return TursoArg{Type: "text", Value: v} }

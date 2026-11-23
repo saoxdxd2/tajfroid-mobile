@@ -26,6 +26,8 @@ import (
 	categoriesmanage "tajfroid-mobile/handlers/categories-manage"
 	checks "tajfroid-mobile/handlers/checks"
 	checksmanage "tajfroid-mobile/handlers/checks-manage"
+	devices "tajfroid-mobile/handlers/devices"
+	devicesmanage "tajfroid-mobile/handlers/devices-manage"
 	customers "tajfroid-mobile/handlers/customers"
 	customersmanage "tajfroid-mobile/handlers/customers-manage"
 	expenses "tajfroid-mobile/handlers/expenses"
@@ -164,6 +166,10 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		finance.Handler(w, r)
 	case "journal":
 		journal.Handler(w, r)
+	case "devices":
+		devices.Handler(w, r)
+	case "devices/manage":
+		devicesmanage.Handler(w, r)
 
 	default:
 		http.NotFound(w, r)

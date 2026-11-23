@@ -64,9 +64,19 @@ export const useSupplierStore = defineStore('suppliers', () => {
     await fetchAll()
   }
 
-  async function archive(id) {
-    const res = await apiFetch(`/api/suppliers/manage?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
-    if (!res.ok) throw new Error('Failed to archive supplier')
+  async function archive(id, baseUpdatedAt) {
+    const q = baseUpdatedAt ? `&baseUpdatedAt=${encodeURIComponent(baseUpdatedAt)}` : ''
+    try {
+      const res = await apiFetch(`/api/suppliers/manage?id=${encodeURIComponent(id)}${q}`, { method: 'DELETE' })
+      if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e }
+      if (!res.ok) throw new Error('Failed to archive supplier')
+    } catch (e) {
+      if (!e.conflict && (!navigator.onLine || e instanceof TypeError)) {
+        await useMutationStore().enqueue({ method: 'DELETE', path: `/api/suppliers/manage?id=${encodeURIComponent(id)}${q}`, body: null, entity: 'supplier', entityId: id, baseUpdatedAt })
+        return
+      }
+      throw e
+    }
     await fetchAll()
   }
 

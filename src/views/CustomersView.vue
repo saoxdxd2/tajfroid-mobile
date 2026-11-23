@@ -45,7 +45,7 @@
         </div>
         <div class="item-actions">
           <button @click="startEdit(c)">Edit</button>
-          <button @click="remove(c.id)" class="danger">Archive</button>
+          <button @click="remove(c)" class="danger">Archive</button>
         </div>
       </li>
     </ul>
@@ -124,9 +124,9 @@ async function saveEdit() {
   }
 }
 
-async function remove(id) {
+async function remove(c) {
   if (!confirm('Archive this customer?')) return
-  try { await store.archive(id) } catch (e) { alert('Error: ' + e.message) }
+  try { await store.archive(c.id, c.updatedAt) } catch (e) { alert('Error: ' + e.message) }
 }
 </script>
 

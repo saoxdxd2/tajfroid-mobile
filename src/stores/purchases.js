@@ -62,16 +62,24 @@ export const usePurchaseStore = defineStore('purchases', () => {
   }
 
   async function update(id, payload) {
-    const res = await apiFetch(`/api/purchases/manage?id=${encodeURIComponent(id)}`, {
-      method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(payload),
-    })
-    if (res.status === 409) {
-      const d = await res.json().catch(()=>({}))
-      await useMutationStore().recordConflict({ method:'PUT', path:`/api/purchases/manage?id=${encodeURIComponent(id)}`, body: payload, entity:'purchase', entityId:id, baseUpdatedAt: payload.baseUpdatedAt, conflict:d, error:d.error })
-      const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e
+    try {
+      const res = await apiFetch(`/api/purchases/manage?id=${encodeURIComponent(id)}`, {
+        method: 'PUT', headers: jsonHeaders(), body: JSON.stringify(payload),
+      })
+      if (res.status === 409) {
+        const d = await res.json().catch(()=>({}))
+        await useMutationStore().recordConflict({ method:'PUT', path:`/api/purchases/manage?id=${encodeURIComponent(id)}`, body: payload, entity:'purchase', entityId:id, baseUpdatedAt: payload.baseUpdatedAt, conflict:d, error:d.error })
+        const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e
+      }
+      if (!res.ok) throw new Error(await readError(res, 'Failed to update purchase'))
+      return res.json()
+    } catch (e) {
+      if (!e.conflict && (!navigator.onLine || e instanceof TypeError)) {
+        await useMutationStore().enqueue({ method:'PUT', path:`/api/purchases/manage?id=${encodeURIComponent(id)}`, body: payload, entity:'purchase', entityId:id, baseUpdatedAt: payload.baseUpdatedAt })
+        return { queued: true }
+      }
+      throw e
     }
-    if (!res.ok) throw new Error(await readError(res, 'Failed to update purchase'))
-    return res.json()
   }
 
   async function validate(id) {

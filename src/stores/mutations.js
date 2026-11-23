@@ -145,5 +145,19 @@ export const useMutationStore = defineStore('mutations', () => {
     await idbPut(next); replace(next)
   }
 
-  return { items, syncing, lastError, load, enqueue, flush, remove, retry, updateBody }
+  async function recordConflict({ method, path, body, entity, entityId, baseUpdatedAt, conflict, error }) {
+    const item = {
+      id: crypto.randomUUID(), method, path, body: body ?? null,
+      entity: entity || null, entityId: entityId || null,
+      baseUpdatedAt: baseUpdatedAt || null,
+      status: 'conflict', attempts: 0,
+      lastError: error || conflict?.error || 'Conflict',
+      conflict: conflict || null,
+      createdAt: Date.now(), updatedAt: Date.now(),
+    }
+    await idbPut(item); items.value.push(item)
+    return item.id
+  }
+
+  return { items, syncing, lastError, load, enqueue, flush, remove, retry, updateBody, recordConflict }
 })

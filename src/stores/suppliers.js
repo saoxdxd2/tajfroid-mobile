@@ -52,7 +52,11 @@ export const useSupplierStore = defineStore('suppliers', () => {
         headers: jsonHeaders(),
         body: JSON.stringify(body),
       })
-      if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict: record changed'); e.conflict=true; e.current=d; throw e }
+      if (res.status === 409) {
+        const d = await res.json().catch(()=>({}))
+        await useMutationStore().recordConflict({ method:'PUT', path:`/api/suppliers/manage?id=${encodeURIComponent(id)}`, body, entity:'supplier', entityId:id, baseUpdatedAt: body.baseUpdatedAt, conflict:d, error:d.error })
+        const e = new Error(d.error||'Conflict: record changed'); e.conflict=true; e.current=d; throw e
+      }
       if (!res.ok) throw new Error(await readError(res, 'Failed to update supplier'))
     } catch (e) {
       if (!e.conflict && (!navigator.onLine || e instanceof TypeError)) {

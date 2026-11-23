@@ -28,6 +28,7 @@ process startup before Vite loads):
 node node_modules/vite/bin/vite.js build   # typical: 0.35–0.45s Vite time
 npm run check:build                        # 5 direct builds, fails if any > 2s
 npm run check:sync                         # offline/conflict/perf invariants
+npm run check:offline                      # runtime queue replay/conflict proof
 go test ./...                              # relay + latency/round-trip guards
 go test ./lib -run TestWarmExecuteLatencyAndConnectionReuse -v
 ```
@@ -50,9 +51,27 @@ scan is encrypted, never on app start.
 2. Set env vars in Vercel:
    - `TURSO_DATABASE_URL` — your Turso database URL (see below)
    - `TURSO_AUTH_TOKEN` — your Turso auth token
+   - `OBSERVABILITY_METRICS` — optional; set to `1` to expose the metrics route
    - (ERP_SETUP_SECRET is no longer needed — auto-connect uses device fingerprint)
 3. Deploy to Vercel. Vercel builds the Go functions automatically.
 4. Point `mobile.tajfroid.com` at the Vercel project.
+
+### Observability
+
+- Every relay request receives an `X-Request-ID` response header. A printable
+  inbound id of at most 128 characters is reused; anything else is replaced by
+  a fresh id. The id is also available on the request context.
+- Each completed request emits one JSON line to stdout with `timestamp`,
+  `requestId`, `route`, `method`, `status`, `duration_ms`, and `auth_kind` /
+  `error_category` when known. Tokens, bodies and raw error text are never
+  logged.
+- `GET /api/router?__route=metrics` returns in-memory `p50_ms`, `p95_ms`,
+  `max_ms` and `count` for the last 1000 samples per route+status — only when
+  `OBSERVABILITY_METRICS=1`. Without the flag the route answers 404.
+- `/api/health` verifies `SELECT 1` and the presence of `idx_devices_token_hash`
+  and `idx_agent_tokens_token_hash`, returning `status` (`ok`/`degraded`),
+  `checks`, `indexes` and `latency_ms`. It answers 200 when healthy and 503
+  otherwise; it never prints the Turso token.
 
 Note: the relay is written in Go. Local `go build ./...` cannot traverse the
 `[id]` dynamic-route directories (Vercel convention); use `go vet` on

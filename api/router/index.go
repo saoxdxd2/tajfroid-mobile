@@ -11,6 +11,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -55,6 +56,15 @@ import (
 )
 
 func Handler(w http.ResponseWriter, r *http.Request) {
+	// Observability wraps the whole router: request id, one structured log
+	// line and a latency sample are emitted even for auth/404 short circuits.
+	started := time.Now()
+	requestID := lib.RequestID(r)
+	w.Header().Set(lib.RequestIDHeader, requestID)
+	r = lib.WithRequestID(r, requestID)
+	observed := lib.NewStatusWriter(w)
+	w = observed
+
 	route := r.URL.Query().Get("__route")
 	if route == "" {
 		// Local development / direct invocations: derive the route from the
@@ -64,12 +74,51 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		route = strings.TrimPrefix(route, "/")
 	}
 	route = strings.Trim(route, "/")
+	routeLabel := lib.SafeRouteLabel(route)
+
+	defer func() {
+		elapsed := time.Since(started)
+		status := observed.Status()
+		entry := lib.RequestLog{
+			Timestamp:     time.Now().UTC().Format(time.RFC3339Nano),
+			RequestID:     requestID,
+			Route:         routeLabel,
+			Method:        r.Method,
+			Status:        status,
+			DurationMS:    lib.DurationMS(elapsed),
+			ErrorCategory: lib.ErrorCategory(status),
+		}
+		// Identity is attached below for authenticated routes; public routes
+		// simply omit the field.
+		if id, ok := lib.IdentityFrom(r); ok && id.Kind != "" {
+			entry.AuthKind = id.Kind
+		}
+		lib.WriteRequestLog(entry)
+		lib.DefaultMetrics.Record(routeLabel, status, elapsed)
+	}()
 
 	// Bound the whole fan-out so a hung Turso call cannot hold a Vercel
 	// invocation until the 15s HTTP backstop.
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
 	r = r.WithContext(ctx)
+
+	// Opt-in observability endpoint. It is intentionally indistinguishable
+	// from an unknown route unless the flag is enabled, and it never carries
+	// tokens, bodies or free-form route data.
+	if route == "metrics" {
+		if os.Getenv("OBSERVABILITY_METRICS") != "1" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		lib.WriteJSON(w, http.StatusOK, lib.DefaultMetrics.Snapshot())
+		return
+	}
 
 	// Public endpoints: health is the uptime probe; pair consumes a one-time
 	// code; agent/bootstrap only works while no agent is registered. Every
@@ -89,11 +138,13 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(route, "agent/scans/") {
 		rest := strings.TrimPrefix(route, "agent/scans/")
 		if id, ok := strings.CutSuffix(rest, "/status"); ok {
+			routeLabel = "agent/scans/:id/status"
 			withID(r, id)
 			agentscanstatus.Handler(w, r)
 			return
 		}
 		if id, ok := strings.CutSuffix(rest, "/file"); ok {
+			routeLabel = "agent/scans/:id/file"
 			withID(r, id)
 			agentscanfile.Handler(w, r)
 			return

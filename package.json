@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "build:fast": "node node_modules/vite/bin/vite.js build",
     "check:sync": "node scripts/check-sync-coverage.mjs",
-    "check:build": "node scripts/check-build-time.mjs"
+    "check:build": "node scripts/check-build-time.mjs",
+    "check:offline": "node scripts/check-offline-runtime.mjs",
+    "check:release": "node scripts/check-release-readiness.mjs"
   },
   "dependencies": {
     "libsodium-wrappers": "^0.8.4",

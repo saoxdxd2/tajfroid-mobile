@@ -38,6 +38,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var body struct {
+			ID          string `json:"id"` // optional client idempotency key
 			PartyType   string `json:"partyType"`
 			CompanyName string `json:"companyName"`
 			FirstName   string `json:"firstName"`
@@ -48,6 +49,13 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			IceNumber   string `json:"iceNumber"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
+		if body.ID != "" {
+			if ex, err := db.Execute("SELECT id, company_name FROM suppliers WHERE id=?", lib.Text(body.ID)); err == nil && len(ex.Rows) > 0 {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{"id": body.ID, "companyName": ex.Rows[0][1], "idempotent": true})
+				return
+			}
+		}
 		if body.CompanyName == "" && body.FirstName == "" {
 			http.Error(w, "companyName or firstName required", http.StatusBadRequest)
 			return
@@ -63,7 +71,10 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		now := time.Now().Unix()
-		id := lib.NewID()
+		id := body.ID
+		if id == "" {
+			id = lib.NewID()
+		}
 		_, err := db.Execute(`INSERT INTO suppliers (id, party_type, company_name, first_name, last_name, contact_name, email, phone, ice_number, is_archived, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
 			lib.Text(id), lib.Text(body.PartyType), lib.Text(companyName),
 			nullableText(body.FirstName), nullableText(body.LastName),

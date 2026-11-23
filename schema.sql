@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS catalog_meta (
 CREATE TABLE IF NOT EXISTS catalog (
   sku TEXT PRIMARY KEY,
   name TEXT NOT NULL,
+  description TEXT,
+  purchase_price TEXT NOT NULL DEFAULT '0',
   sale_price TEXT NOT NULL,
   vat_rate TEXT NOT NULL,
   stock INTEGER NOT NULL DEFAULT 0,
@@ -57,6 +59,22 @@ CREATE TABLE IF NOT EXISTS scan_events (
   to_status TEXT NOT NULL,
   at INTEGER NOT NULL,
   note TEXT
+);
+
+-- Categories
+CREATE TABLE IF NOT EXISTS categories (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+-- Brands
+CREATE TABLE IF NOT EXISTS brands (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(status);

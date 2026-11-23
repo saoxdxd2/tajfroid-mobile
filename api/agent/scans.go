@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"tajfroid-relay/lib"
+	"tajfroid-mobile/lib"
 )
 
 func Handler(w http.ResponseWriter, r *http.Request) {

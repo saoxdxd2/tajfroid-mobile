@@ -10,11 +10,12 @@
     <ul class="list">
       <li v-for="d in devices" :key="d.id" class="card">
         <div class="row">
-          <strong>{{ d.name || 'Device' }}</strong>
+          <strong>{{ d.name || 'Device' }} <span v-if="d.id===currentDeviceId" class="me">(this device)</span></strong>
           <span :class="d.revokedAt ? 'revoked' : 'active'">{{ d.revokedAt ? 'revoked' : 'active' }}</span>
         </div>
         <div class="meta">ID: {{ d.id.slice(0,12) }}… · paired {{ fmt(d.pairedAt) }}</div>
-        <button v-if="!d.revokedAt" class="danger" @click="revoke(d.id)">Revoke</button>
+        <button v-if="!d.revokedAt && d.id!==currentDeviceId" class="danger" @click="revoke(d.id)">Revoke</button>
+        <span v-if="!d.revokedAt && d.id===currentDeviceId" class="muted">Current device cannot be revoked here.</span>
       </li>
     </ul>
   </div>
@@ -29,6 +30,7 @@ import { apiFetch, readError } from '../lib/api'
 const store = useDeviceStore()
 const paired = computed(() => !!store.deviceToken)
 const relayUrl = computed(() => store.relayUrl)
+const currentDeviceId = computed(() => store.deviceId)
 const devices = ref([])
 const loading = ref(false)
 const error = ref('')
@@ -73,6 +75,7 @@ onMounted(loadDevices)
 
 <style scoped>
 .muted { color:#666; font-size:13px; }
+.me { color:#1565c0; font-size:12px; font-weight:normal; }
 .err { color:#b00020; }
 .list { list-style:none; padding:0; margin:12px 0; display:flex; flex-direction:column; gap:10px; }
 .card { border:1px solid #ddd; border-radius:10px; padding:12px; background:#fff; }

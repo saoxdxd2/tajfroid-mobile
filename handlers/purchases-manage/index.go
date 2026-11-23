@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -29,12 +30,12 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPut:
 		var body struct {
-			Action           string `json:"action"`
-			SupplierID       string `json:"supplierId"`
-			Reference        string `json:"reference"`
-			PurchaseDate     int64  `json:"purchaseDate"`
+			Action            string `json:"action"`
+			SupplierID        string `json:"supplierId"`
+			Reference         string `json:"reference"`
+			PurchaseDate      int64  `json:"purchaseDate"`
 			SupplierInvoiceNo string `json:"supplierInvoiceNo"`
-			BaseUpdatedAt    int64  `json:"baseUpdatedAt"`
+			BaseUpdatedAt     int64  `json:"baseUpdatedAt"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
 		if body.BaseUpdatedAt > 0 {
@@ -51,7 +52,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case "validate":
-			if err := validatePurchase(db, id); err != nil {
+			if err := validatePurchase(r.Context(), db, id); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -134,53 +135,107 @@ func updatePurchase(db *lib.TursoClient, id, supplierID, reference string, purch
 
 // validatePurchase adds every line back into stock, exactly like the desktop
 // PurchasingService.validate_purchase, then marks the purchase Validated.
-func validatePurchase(db *lib.TursoClient, id string) error {
-	state, err := purchaseState(db, id)
+// Existence checks and stock updates now run through two ExecuteBatch calls
+// instead of two pipeline POSTs per line.
+func validatePurchase(ctx context.Context, db *lib.TursoClient, id string) error {
+	reads, err := db.ExecuteBatch(ctx,
+		lib.TursoStmt{
+			SQL:  "SELECT state, reference, supplier_id, total_amount FROM purchases WHERE id = ?",
+			Args: []lib.TursoArg{lib.Text(id)},
+		},
+		lib.TursoStmt{
+			SQL:  "SELECT product_sku, quantity FROM purchase_items WHERE purchase_id = ?",
+			Args: []lib.TursoArg{lib.Text(id)},
+		},
+	)
 	if err != nil {
 		return err
 	}
-	if state != "Draft" {
+	if len(reads[0].Rows) == 0 {
+		return errText("purchase not found")
+	}
+	purchaseRow := reads[0].Rows[0]
+	if state := lib.ToString(purchaseRow[0]); state != "Draft" {
 		return errText("purchase is not in Draft state")
 	}
-	res, err := db.Execute("SELECT product_sku, quantity FROM purchase_items WHERE purchase_id = ?", lib.Text(id))
-	if err != nil {
-		return err
-	}
-	if len(res.Rows) == 0 {
+	if len(reads[1].Rows) == 0 {
 		return errText("cannot validate a purchase with no items")
 	}
 	type line struct {
 		sku string
 		qty int
 	}
-	lines := make([]line, 0, len(res.Rows))
-	for _, row := range res.Rows {
+	lines := make([]line, 0, len(reads[1].Rows))
+	for _, row := range reads[1].Rows {
 		lines = append(lines, line{sku: lib.ToString(row[0]), qty: lib.ToInt(row[1])})
 	}
-	// Verify every product exists before touching stock.
+
+	skus := make([]string, 0, len(lines))
+	needed := make(map[string]int, len(lines))
 	for _, l := range lines {
-		check, err := db.Execute("SELECT sku FROM catalog WHERE sku = ?", lib.Text(l.sku))
-		if err != nil || len(check.Rows) == 0 {
-			return errText("product not found: " + l.sku)
+		if _, ok := needed[l.sku]; !ok {
+			skus = append(skus, l.sku)
 		}
+		needed[l.sku] += l.qty
 	}
-	now := time.Now().Unix()
-	for _, l := range lines {
-		if _, err := db.Execute("UPDATE catalog SET stock = stock + ? WHERE sku = ?", lib.Int(int64(l.qty)), lib.Text(l.sku)); err != nil {
-			return err
-		}
+	checks := make([]lib.TursoStmt, 0, len(skus))
+	for _, sku := range skus {
+		checks = append(checks, lib.TursoStmt{
+			SQL:  "SELECT sku FROM catalog WHERE sku = ?",
+			Args: []lib.TursoArg{lib.Text(sku)},
+		})
 	}
-	if _, err := db.Execute("UPDATE purchases SET state=?, updated_at=? WHERE id=?", lib.Text("Validated"), lib.Int(now), lib.Text(id)); err != nil {
+	checkRows, err := db.ExecuteBatch(ctx, checks...)
+	if err != nil {
 		return err
 	}
-	ref, _ := db.Execute("SELECT reference, supplier_id, total_amount FROM purchases WHERE id = ?", lib.Text(id))
-	if len(ref.Rows) > 0 {
-		lib.Journal(db, lib.TxPurchase, "PUR-"+lib.ToString(ref.Rows[0][0]),
-			"Purchase validated from supplier "+lib.ToString(ref.Rows[0][1]),
-			-lib.ParseMoney(lib.ToString(ref.Rows[0][2])), time.Now())
+	// Verify every product exists before touching stock.
+	for i, sku := range skus {
+		if len(checkRows[i].Rows) == 0 {
+			return errText("product not found: " + sku)
+		}
 	}
-	db.Execute("INSERT INTO catalog_meta (id, version, updated_at) VALUES (1, 1, ?) ON CONFLICT(id) DO UPDATE SET version = version + 1, updated_at = excluded.updated_at", lib.Int(now))
-	return nil
+
+	now := time.Now().Unix()
+	writes := make([]lib.TursoStmt, 0, len(skus)+3)
+	for _, sku := range skus {
+		writes = append(writes, lib.TursoStmt{
+			SQL:  "UPDATE catalog SET stock = stock + ? WHERE sku = ?",
+			Args: []lib.TursoArg{lib.Int(int64(needed[sku])), lib.Text(sku)},
+		})
+	}
+	writes = append(writes,
+		lib.TursoStmt{
+			SQL:  "UPDATE purchases SET state=?, updated_at=? WHERE id=?",
+			Args: []lib.TursoArg{lib.Text("Validated"), lib.Int(now), lib.Text(id)},
+		},
+		purchaseJournalStmt(purchaseRow, now),
+		catalogMetaStmt(now),
+	)
+	_, err = db.ExecuteBatch(ctx, writes...)
+	return err
+}
+
+func purchaseJournalStmt(row []interface{}, now int64) lib.TursoStmt {
+	return lib.TursoStmt{
+		SQL: `INSERT INTO journal_entries
+		(id, transaction_type, reference_id, description, amount, is_reversed, created_at)
+		VALUES (?,?,?,?,?,?,?)`,
+		Args: []lib.TursoArg{
+			lib.Text(lib.NewID()), lib.Text(lib.TxPurchase),
+			lib.Text("PUR-" + lib.ToString(row[1])),
+			lib.Text("Purchase validated from supplier " + lib.ToString(row[2])),
+			lib.Text(lib.FormatMoney(-lib.ParseMoney(lib.ToString(row[3])))),
+			lib.Int(0), lib.Int(now),
+		},
+	}
+}
+
+func catalogMetaStmt(now int64) lib.TursoStmt {
+	return lib.TursoStmt{
+		SQL:  "INSERT INTO catalog_meta (id, version, updated_at) VALUES (1, 1, ?) ON CONFLICT(id) DO UPDATE SET version = version + 1, updated_at = excluded.updated_at",
+		Args: []lib.TursoArg{lib.Int(now)},
+	}
 }
 
 func purchaseState(db *lib.TursoClient, id string) (string, error) {
@@ -209,7 +264,7 @@ func loadPurchase(db *lib.TursoClient, id string) (map[string]interface{}, error
 	purchase := map[string]interface{}{
 		"id": row[0], "reference": row[1], "supplierId": row[2],
 		"supplierName": lib.NullStr(row[3]), "state": row[4],
-		"totalAmount": lib.FormatMoney(lib.ParseMoney(lib.ToString(row[5]))),
+		"totalAmount":  lib.FormatMoney(lib.ParseMoney(lib.ToString(row[5]))),
 		"purchaseDate": row[6], "supplierInvoiceNo": lib.NullStr(row[7]),
 		"sourceFileName": lib.NullStr(row[8]), "createdAt": row[9], "updatedAt": row[10],
 	}
@@ -232,4 +287,3 @@ func loadPurchase(db *lib.TursoClient, id string) (map[string]interface{}, error
 type errText string
 
 func (e errText) Error() string { return string(e) }
-

@@ -3,56 +3,186 @@ import { ref } from 'vue'
 import { apiFetch, readError, getRelayUrl } from '../lib/api'
 
 const DB_NAME = 'tajfroid-scan-queue'
-const DB_VERSION = 1
+// v2 moves ciphertext into its own store so ordinary metadata reads never
+// deserialize a multi-MB payload (v1 kept ciphertextB64 inline on every row).
+const DB_VERSION = 2
 const STORE = 'scans'
+const PAYLOAD_STORE = 'scanPayloads'
 const MAX_PX = 2000
 const MAX_BYTES = 2_500_000
 const JPEG_QUALITY = 0.82
 
+// Bounded terminal history: enough context in the UI without unbounded growth.
+const TERMINAL_STATUSES = ['uploaded', 'imported', 'rejected', 'failed', 'failed_local']
+const MAX_TERMINAL_ROWS = 100
+const TERMINAL_TTL_MS = 7 * 24 * 60 * 60 * 1000
+// upload_failed stays retryable, but a permanently failing scan must not keep
+// its ciphertext forever. Both limits convert it to a terminal `failed` row.
+const MAX_UPLOAD_ATTEMPTS = 20
+const UPLOAD_FAILED_TTL_MS = 7 * 24 * 60 * 60 * 1000
+
 function openDb() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION)
+    let migrationError = null
     req.onupgradeneeded = () => {
       const db = req.result
+      const tx = req.transaction
+      let scans
       if (!db.objectStoreNames.contains(STORE)) {
-        const os = db.createObjectStore(STORE, { keyPath: 'clientId' })
-        os.createIndex('status', 'status', { unique: false })
-        os.createIndex('updatedAt', 'updatedAt', { unique: false })
+        scans = db.createObjectStore(STORE, { keyPath: 'clientId' })
+        scans.createIndex('status', 'status', { unique: false })
+        scans.createIndex('updatedAt', 'updatedAt', { unique: false })
+      } else {
+        scans = tx.objectStore(STORE)
+      }
+      if (!db.objectStoreNames.contains(PAYLOAD_STORE)) {
+        const payloads = db.createObjectStore(PAYLOAD_STORE, { keyPath: 'clientId' })
+        // One-time v1 migration: pull inline ciphertext out of scans.
+        const cursorReq = scans.openCursor()
+        cursorReq.onsuccess = () => {
+          const cursor = cursorReq.result
+          if (!cursor) return
+          const item = cursor.value
+          if (item && item.ciphertextB64) {
+            payloads.put({ clientId: item.clientId, ciphertextB64: item.ciphertextB64 })
+            delete item.ciphertextB64
+            cursor.update(item)
+          }
+          cursor.continue()
+        }
+        cursorReq.onerror = () => { migrationError = cursorReq.error || new Error('Queue migration failed') }
       }
     }
-    req.onsuccess = () => resolve(req.result)
+    req.onsuccess = () => {
+      if (migrationError) {
+        req.result.close()
+        reject(migrationError)
+        return
+      }
+      resolve(req.result)
+    }
     req.onerror = () => reject(req.error || new Error('IndexedDB open failed'))
   })
 }
 
-async function idbGetAll() {
-  const db = await openDb()
+function txDone(tx) {
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readonly')
-    const req = tx.objectStore(STORE).getAll()
-    req.onsuccess = () => resolve(req.result || [])
-    req.onerror = () => reject(req.error)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'))
   })
 }
 
+// Metadata only: scans rows no longer carry ciphertextB64 (v2 schema).
+async function idbGetAll() {
+  const db = await openDb()
+  try {
+    const tx = db.transaction(STORE, 'readonly')
+    const done = txDone(tx)
+    const req = tx.objectStore(STORE).getAll()
+    let rows = []
+    req.onsuccess = () => { rows = req.result || [] }
+    await done
+    return rows
+  } finally {
+    db.close()
+  }
+}
+
+// Read only the rows matching the given statuses via the existing status index.
+// Callers that need ciphertext fetch it separately, one row at a time.
+async function idbGetByStatuses(statuses) {
+  const wanted = [...new Set(statuses)].filter(Boolean)
+  if (!wanted.length) return []
+  const db = await openDb()
+  try {
+    const tx = db.transaction(STORE, 'readonly')
+    const done = txDone(tx)
+    const index = tx.objectStore(STORE).index('status')
+    const rows = []
+    for (const status of wanted) {
+      const req = index.getAll(IDBKeyRange.only(status))
+      req.onsuccess = () => { if (req.result) rows.push(...req.result) }
+    }
+    await done
+    return rows
+  } finally {
+    db.close()
+  }
+}
+
+async function idbGetCiphertext(clientId) {
+  const db = await openDb()
+  try {
+    const tx = db.transaction(PAYLOAD_STORE, 'readonly')
+    const done = txDone(tx)
+    const req = tx.objectStore(PAYLOAD_STORE).get(clientId)
+    let payload
+    req.onsuccess = () => { payload = req.result }
+    await done
+    return payload?.ciphertextB64
+  } finally {
+    db.close()
+  }
+}
+
+// Writes metadata and, when supplied, the payload in one transaction. When no
+// ciphertext is supplied the existing payload is left untouched, so metadata
+// refresh during a status pull cannot break a pending retry.
 async function idbPut(item) {
   const db = await openDb()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite')
-    tx.objectStore(STORE).put(item)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
-  })
+  try {
+    const tx = db.transaction([STORE, PAYLOAD_STORE], 'readwrite')
+    const done = txDone(tx)
+    const { ciphertextB64, ...meta } = item
+    tx.objectStore(STORE).put(meta)
+    if (ciphertextB64 !== undefined && ciphertextB64 !== null) {
+      tx.objectStore(PAYLOAD_STORE).put({ clientId: item.clientId, ciphertextB64 })
+    }
+    await done
+  } finally {
+    db.close()
+  }
+}
+
+async function idbDeleteCiphertext(clientId) {
+  const db = await openDb()
+  try {
+    const tx = db.transaction(PAYLOAD_STORE, 'readwrite')
+    const done = txDone(tx)
+    tx.objectStore(PAYLOAD_STORE).delete(clientId)
+    await done
+  } finally {
+    db.close()
+  }
+}
+
+async function idbDeleteMany(clientIds) {
+  if (!clientIds.length) return
+  const db = await openDb()
+  try {
+    const tx = db.transaction([STORE, PAYLOAD_STORE], 'readwrite')
+    const done = txDone(tx)
+    const scans = tx.objectStore(STORE)
+    const payloads = tx.objectStore(PAYLOAD_STORE)
+    for (const clientId of clientIds) {
+      scans.delete(clientId)
+      payloads.delete(clientId)
+    }
+    await done
+  } finally {
+    db.close()
+  }
 }
 
 async function idbDelete(clientId) {
-  const db = await openDb()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite')
-    tx.objectStore(STORE).delete(clientId)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
-  })
+  await idbDeleteMany([clientId])
+}
+
+function rowAgeMs(item) {
+  const raw = item.updatedAt || item.capturedAt || 0
+  return Date.now() - (raw > 1e12 ? raw : raw * 1000)
 }
 
 function bytesToBase64(bytes) {
@@ -118,7 +248,27 @@ export const useQueueStore = defineStore('queue', () => {
   async function load() {
     const all = await idbGetAll()
     all.sort((a, b) => (b.capturedAt || 0) - (a.capturedAt || 0))
-    items.value = all.map(x => ({ ...x, ciphertextB64: undefined }))
+    items.value = all.map(x => {
+      // Defensive: legacy rows (or a failed migration) may still carry it.
+      const meta = { ...x }
+      delete meta.ciphertextB64
+      return meta
+    })
+    await pruneTerminal()
+  }
+
+  // Keep at most MAX_TERMINAL_ROWS terminal rows, dropping older rows past
+  // TERMINAL_TTL_MS. Pending / retryable rows are never considered here.
+  async function pruneTerminal() {
+    const terminal = await idbGetByStatuses(TERMINAL_STATUSES)
+    if (!terminal.length) return
+    terminal.sort((a, b) => (b.updatedAt || b.capturedAt || 0) - (a.updatedAt || a.capturedAt || 0))
+    const stale = terminal.filter((x, i) => i >= MAX_TERMINAL_ROWS || rowAgeMs(x) > TERMINAL_TTL_MS)
+    if (!stale.length) return
+    const ids = stale.map(x => x.clientId)
+    await idbDeleteMany(ids)
+    const gone = new Set(ids)
+    items.value = items.value.filter(x => !gone.has(x.clientId))
   }
 
   function upsertLocal(item) {
@@ -177,9 +327,28 @@ export const useQueueStore = defineStore('queue', () => {
     syncing.value = true
     lastSyncError.value = ''
     try {
-      const all = await idbGetAll()
-      const pending = all.filter(x => ['pending_upload', 'upload_failed'].includes(x.status) && x.ciphertextB64)
+      // Status-index lookup, not getAll(): terminal history is never read here.
+      const pending = await idbGetByStatuses(['pending_upload', 'upload_failed'])
+      const nowSec = Math.floor(Date.now() / 1000)
       for (const item of pending) {
+        // Bound how long a failing upload keeps its (multi-MB) ciphertext.
+        // A capped row becomes terminal `failed` and its payload is dropped;
+        // pending_upload rows are always left for retry.
+        if (item.status === 'upload_failed' &&
+            ((item.attempts || 0) >= MAX_UPLOAD_ATTEMPTS || rowAgeMs(item) > UPLOAD_FAILED_TTL_MS)) {
+          const stopped = {
+            ...item,
+            status: 'failed',
+            message: 'Upload stopped after repeated failures or timeout',
+            updatedAt: nowSec,
+          }
+          await idbPut(stopped)
+          await idbDeleteCiphertext(item.clientId)
+          upsertLocal(stopped)
+          continue
+        }
+        const ciphertextB64 = await idbGetCiphertext(item.clientId)
+        if (!ciphertextB64) continue
         try {
           const res = await apiFetch('/api/scans', {
             method: 'POST',
@@ -189,7 +358,7 @@ export const useQueueStore = defineStore('queue', () => {
               capturedAt: item.capturedAt,
               sizeBytes: item.sizeBytes || 0,
               sha256: item.sha256 || '',
-              ciphertextB64: item.ciphertextB64,
+              ciphertextB64,
               contentType: item.contentType || 'application/octet-stream',
             }),
           })
@@ -205,8 +374,8 @@ export const useQueueStore = defineStore('queue', () => {
           }
           // Keep ciphertext locally until we know it's safely uploaded; can be
           // dropped after upload to save space.
-          delete next.ciphertextB64
           await idbPut(next)
+          await idbDeleteCiphertext(item.clientId)
           upsertLocal(next)
         } catch (e) {
           const next = {
@@ -216,12 +385,15 @@ export const useQueueStore = defineStore('queue', () => {
             attempts: (item.attempts || 0) + 1,
             updatedAt: Math.floor(Date.now() / 1000),
           }
+          // idbPut leaves the existing payload untouched when no ciphertext is
+          // supplied, so the retry still has what it needs.
           await idbPut(next)
           upsertLocal(next)
           lastSyncError.value = next.message
         }
       }
       await pullRemoteStatuses()
+      await pruneTerminal()
     } finally {
       syncing.value = false
     }
@@ -234,6 +406,7 @@ export const useQueueStore = defineStore('queue', () => {
       const data = await res.json()
       const remote = data.scans || []
       if (!remote.length) return
+      // Metadata-only read: no ciphertext is deserialized during a status pull.
       const all = await idbGetAll()
       const byClient = new Map(all.map(x => [x.clientId, x]))
       for (const r of remote) {
@@ -249,8 +422,8 @@ export const useQueueStore = defineStore('queue', () => {
           updatedAt: Math.floor(Date.now() / 1000),
         }
         // Once terminal and uploaded, ciphertext no longer needed locally.
-        if (terminal) delete next.ciphertextB64
         await idbPut(next)
+        if (terminal) await idbDeleteCiphertext(local.clientId)
         upsertLocal(next)
       }
     } catch {

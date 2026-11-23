@@ -61,14 +61,34 @@ function nextSeq() { return ++seqCounter }
 
 export const useMutationStore = defineStore('mutations', () => {
   const items = ref([])
+  // O(1) lookups for replace/retry/idempotency instead of scanning the queue
+  // once per flushed item (which made replay O(n^2)).
+  const index = new Map()
+  const byKey = new Map()
   const syncing = ref(false)
   const lastError = ref('')
 
+  function reindex() {
+    index.clear(); byKey.clear()
+    items.value.forEach((x, i) => {
+      index.set(x.id, i)
+      if (x.idempotencyKey &&
+          ['applied', 'pending', 'conflict'].includes(x.status) &&
+          !byKey.has(x.idempotencyKey)) {
+        byKey.set(x.idempotencyKey, x.id)
+      }
+    })
+  }
+
   async function load() {
     const all = await idbAll()
+    // seqCounter resets on page reload; persisted seq values do not. Seed it
+    // from storage so newly queued mutations always sort after old ones.
+    for (const x of all) seqCounter = Math.max(seqCounter, Number(x.seq) || 0)
     // Replay-safe ordered processing: sequential by seq (assigned on enqueue/recordConflict).
     all.sort((a, b) => (a.seq || 0) - (b.seq || 0))
     items.value = all
+    reindex()
     await pruneApplied()
   }
 
@@ -85,13 +105,13 @@ export const useMutationStore = defineStore('mutations', () => {
     if (!stale.size) return
     for (const id of stale) await idbDel(id)
     items.value = items.value.filter(x => !stale.has(x.id))
+    reindex()
   }
 
   async function enqueue({ method, path, body, entity, entityId, baseUpdatedAt, idempotencyKey }) {
     const key = idempotencyKey || (body && typeof body === 'object' ? body.id : null)
-    if (key && items.value.some(x => x.idempotencyKey === key && (x.status === 'applied' || x.status === 'pending' || x.status === 'conflict'))) {
-      return items.value.find(x => x.idempotencyKey === key).id // idempotent replay: already tracked
-    }
+    const existing = key ? byKey.get(key) : null
+    if (existing) return existing // idempotent replay: already tracked
     const item = {
       id: crypto.randomUUID(),
       seq: nextSeq(),
@@ -103,7 +123,8 @@ export const useMutationStore = defineStore('mutations', () => {
       createdAt: Date.now(), updatedAt: Date.now(),
     }
     await idbPut(item)
-    items.value.push(item)
+    index.set(item.id, items.value.push(item) - 1)
+    if (key) byKey.set(key, item.id)
     flush().catch(() => {})
     return item.id
   }
@@ -159,17 +180,22 @@ export const useMutationStore = defineStore('mutations', () => {
   }
 
   function replace(item) {
-    const i = items.value.findIndex(x => x.id === item.id)
-    if (i >= 0) items.value[i] = item
+    const i = index.get(item.id)
+    if (i !== undefined) items.value[i] = item
   }
 
   async function remove(id) {
     await idbDel(id)
+    const i = index.get(id)
+    const key = i !== undefined ? items.value[i].idempotencyKey : null
+    if (key && byKey.get(key) === id) byKey.delete(key)
     items.value = items.value.filter(x => x.id !== id)
+    reindex()
   }
 
   async function retry(id) {
-    const item = items.value.find(x => x.id === id)
+    const i = index.get(id)
+    const item = i !== undefined ? items.value[i] : null
     if (!item) return
     const next = { ...item, status: 'pending', lastError: null, updatedAt: Date.now() }
     await idbPut(next); replace(next)
@@ -177,7 +203,8 @@ export const useMutationStore = defineStore('mutations', () => {
   }
 
   async function updateBody(id, body) {
-    const item = items.value.find(x => x.id === id)
+    const i = index.get(id)
+    const item = i !== undefined ? items.value[i] : null
     if (!item) return
     const next = { ...item, body, status: 'pending', lastError: null, updatedAt: Date.now() }
     await idbPut(next); replace(next)
@@ -195,7 +222,9 @@ export const useMutationStore = defineStore('mutations', () => {
       conflict: conflict || null, serverId: null,
       createdAt: Date.now(), updatedAt: Date.now(),
     }
-    await idbPut(item); items.value.push(item)
+    await idbPut(item)
+    index.set(item.id, items.value.push(item) - 1)
+    if (key) byKey.set(key, item.id)
     return item.id
   }
 

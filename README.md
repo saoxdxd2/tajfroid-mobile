@@ -19,6 +19,22 @@ npm install
 npm run dev
 ```
 
+## Performance checks
+
+The production build is measured directly through Vite (npm adds 0.5–0.8s of
+process startup before Vite loads):
+
+```bash
+node node_modules/vite/bin/vite.js build   # typical: 0.35–0.45s Vite time
+npm run check:build                        # 5 direct builds, fails if any > 2s
+npm run check:sync                         # offline/conflict/perf invariants
+go test ./...                              # relay + latency/round-trip guards
+go test ./lib -run TestWarmExecuteLatencyAndConnectionReuse -v
+```
+
+`libsodium-wrappers` is intentionally a lazy chunk: it is loaded only when a
+scan is encrypted, never on app start.
+
 ## Setup (relay, Go)
 
 ### Get your Turso URL and token

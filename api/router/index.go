@@ -9,8 +9,10 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	agentbootstrap "tajfroid-mobile/handlers/agent/bootstrap"
 	agentcatalog "tajfroid-mobile/handlers/agent/catalog"
@@ -26,10 +28,10 @@ import (
 	categoriesmanage "tajfroid-mobile/handlers/categories-manage"
 	checks "tajfroid-mobile/handlers/checks"
 	checksmanage "tajfroid-mobile/handlers/checks-manage"
-	devices "tajfroid-mobile/handlers/devices"
-	devicesmanage "tajfroid-mobile/handlers/devices-manage"
 	customers "tajfroid-mobile/handlers/customers"
 	customersmanage "tajfroid-mobile/handlers/customers-manage"
+	devices "tajfroid-mobile/handlers/devices"
+	devicesmanage "tajfroid-mobile/handlers/devices-manage"
 	expenses "tajfroid-mobile/handlers/expenses"
 	expensesmanage "tajfroid-mobile/handlers/expenses-manage"
 	finance "tajfroid-mobile/handlers/finance"
@@ -63,15 +65,24 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	}
 	route = strings.Trim(route, "/")
 
+	// Bound the whole fan-out so a hung Turso call cannot hold a Vercel
+	// invocation until the 15s HTTP backstop.
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
+
 	// Public endpoints: health is the uptime probe; pair consumes a one-time
 	// code; agent/bootstrap only works while no agent is registered. Every
 	// other route requires a paired device or agent token.
 	switch route {
 	case "health", "pair", "agent/bootstrap":
 	default:
-		if !lib.RequireAuth(w, r) {
+		id, ok := lib.RequireAuth(w, r)
+		if !ok {
 			return
 		}
+		// Handlers reuse the verified identity instead of re-querying tokens.
+		r = lib.WithIdentity(r, id)
 	}
 
 	// Dynamic agent scan routes: /api/agent/scans/{id}/status|file

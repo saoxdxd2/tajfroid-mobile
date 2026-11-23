@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -51,7 +52,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case "validate":
-			if err := validateInvoice(db, id); err != nil {
+			if err := validateInvoice(r.Context(), db, id); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -132,19 +133,30 @@ func updateInvoiceFields(db *lib.TursoClient, id, customerID, channel string, du
 
 // validateInvoice is the multi-domain transaction from the desktop ERP:
 // stock goes down (never below zero) and the invoice becomes Validated.
-func validateInvoice(db *lib.TursoClient, id string) error {
-	inv, err := getInvoice(db, id)
+// The old per-line loop cost up to 3 pipeline POSTs per line; the reads and
+// writes now each fit in a single ExecuteBatch call.
+func validateInvoice(ctx context.Context, db *lib.TursoClient, id string) error {
+	reads, err := db.ExecuteBatch(ctx,
+		lib.TursoStmt{
+			SQL:  "SELECT id, invoice_number, customer_id, state, total_amount, channel, due_date, notes, created_at, updated_at FROM invoices WHERE id = ?",
+			Args: []lib.TursoArg{lib.Text(id)},
+		},
+		lib.TursoStmt{
+			SQL:  "SELECT product_sku, quantity, warranty_months FROM invoice_items WHERE invoice_id = ?",
+			Args: []lib.TursoArg{lib.Text(id)},
+		},
+	)
 	if err != nil {
 		return err
 	}
+	if len(reads[0].Rows) == 0 {
+		return errText("invoice not found")
+	}
+	inv := invoiceFromRow(reads[0].Rows[0])
 	if lib.ToString(inv["state"]) != "Draft" {
 		return errText("invoice is not in Draft state")
 	}
-	res, err := db.Execute("SELECT product_sku, quantity, warranty_months FROM invoice_items WHERE invoice_id = ?", lib.Text(id))
-	if err != nil {
-		return err
-	}
-	if len(res.Rows) == 0 {
+	if len(reads[1].Rows) == 0 {
 		return errText("cannot validate an invoice with no items")
 	}
 	type line struct {
@@ -152,42 +164,96 @@ func validateInvoice(db *lib.TursoClient, id string) error {
 		qty  int
 		warr int
 	}
-	lines := make([]line, 0, len(res.Rows))
-	for _, row := range res.Rows {
+	lines := make([]line, 0, len(reads[1].Rows))
+	for _, row := range reads[1].Rows {
 		lines = append(lines, line{
 			sku: lib.ToString(row[0]), qty: lib.ToInt(row[1]), warr: lib.ToInt(row[2]),
 		})
 	}
-	// Check every line before mutating anything, so a failure leaves stock intact.
+
+	// One stock check per unique SKU, with quantities summed so repeated SKU
+	// lines cannot each spend the same units.
+	skus := make([]string, 0, len(lines))
+	needed := make(map[string]int, len(lines))
 	for _, l := range lines {
-		stockRes, err := db.Execute("SELECT stock, name FROM catalog WHERE sku = ?", lib.Text(l.sku))
-		if err != nil || len(stockRes.Rows) == 0 {
-			return errText("product not found: " + l.sku)
+		if _, ok := needed[l.sku]; !ok {
+			skus = append(skus, l.sku)
 		}
-		if lib.ToInt(stockRes.Rows[0][0]) < l.qty {
-			return errText("insufficient stock for " + lib.ToString(stockRes.Rows[0][1]) + " (" + l.sku + ")")
-		}
+		needed[l.sku] += l.qty
 	}
-	now := time.Now().Unix()
-	for _, l := range lines {
-		if _, err := db.Execute("UPDATE catalog SET stock = stock - ? WHERE sku = ? AND stock >= ?",
-			lib.Int(int64(l.qty)), lib.Text(l.sku), lib.Int(int64(l.qty))); err != nil {
-			return err
-		}
-		if l.warr > 0 {
-			end := now + int64(l.warr)*30*24*3600
-			db.Execute("UPDATE invoice_items SET warranty_end_date=? WHERE invoice_id=? AND product_sku=?",
-				lib.Int(end), lib.Text(id), lib.Text(l.sku))
-		}
+	checks := make([]lib.TursoStmt, 0, len(skus))
+	for _, sku := range skus {
+		checks = append(checks, lib.TursoStmt{
+			SQL:  "SELECT stock, name FROM catalog WHERE sku = ?",
+			Args: []lib.TursoArg{lib.Text(sku)},
+		})
 	}
-	if _, err := db.Execute("UPDATE invoices SET state=?, updated_at=? WHERE id=?", lib.Text("Validated"), lib.Int(now), lib.Text(id)); err != nil {
+	stockRows, err := db.ExecuteBatch(ctx, checks...)
+	if err != nil {
 		return err
 	}
-	lib.Journal(db, lib.TxSale, "INV-"+lib.ToString(inv["invoiceNumber"]),
-		"Invoice validated for "+lib.ToString(inv["customerId"]),
-		lib.ParseMoney(lib.ToString(inv["totalAmount"])), time.Now())
-	bumpCatalog(db, now)
-	return nil
+	// Verify every SKU before mutating anything, so a failure leaves stock intact.
+	for i, sku := range skus {
+		if len(stockRows[i].Rows) == 0 {
+			return errText("product not found: " + sku)
+		}
+		row := stockRows[i].Rows[0]
+		if lib.ToInt(row[0]) < needed[sku] {
+			return errText("insufficient stock for " + lib.ToString(row[1]) + " (" + sku + ")")
+		}
+	}
+
+	now := time.Now().Unix()
+	writes := make([]lib.TursoStmt, 0, len(skus)+len(lines)+3)
+	for _, sku := range skus {
+		qty := needed[sku]
+		writes = append(writes, lib.TursoStmt{
+			SQL:  "UPDATE catalog SET stock = stock - ? WHERE sku = ? AND stock >= ?",
+			Args: []lib.TursoArg{lib.Int(int64(qty)), lib.Text(sku), lib.Int(int64(qty))},
+		})
+	}
+	for _, l := range lines {
+		if l.warr > 0 {
+			end := now + int64(l.warr)*30*24*3600
+			writes = append(writes, lib.TursoStmt{
+				SQL:  "UPDATE invoice_items SET warranty_end_date=? WHERE invoice_id=? AND product_sku=?",
+				Args: []lib.TursoArg{lib.Int(end), lib.Text(id), lib.Text(l.sku)},
+			})
+		}
+	}
+	writes = append(writes,
+		lib.TursoStmt{
+			SQL:  "UPDATE invoices SET state=?, updated_at=? WHERE id=?",
+			Args: []lib.TursoArg{lib.Text("Validated"), lib.Int(now), lib.Text(id)},
+		},
+		saleJournalStmt(inv, now),
+		catalogMetaStmt(now),
+	)
+	_, err = db.ExecuteBatch(ctx, writes...)
+	return err
+}
+
+func invoiceFromRow(row []interface{}) map[string]interface{} {
+	return map[string]interface{}{
+		"id": row[0], "invoiceNumber": row[1], "customerId": row[2],
+		"state": row[3], "totalAmount": row[4], "channel": row[5],
+		"dueDate": row[6], "notes": row[7], "createdAt": row[8], "updatedAt": row[9],
+	}
+}
+
+func saleJournalStmt(inv map[string]interface{}, now int64) lib.TursoStmt {
+	return lib.TursoStmt{
+		SQL: `INSERT INTO journal_entries
+		(id, transaction_type, reference_id, description, amount, is_reversed, created_at)
+		VALUES (?,?,?,?,?,?,?)`,
+		Args: []lib.TursoArg{
+			lib.Text(lib.NewID()), lib.Text(lib.TxSale),
+			lib.Text("INV-" + lib.ToString(inv["invoiceNumber"])),
+			lib.Text("Invoice validated for " + lib.ToString(inv["customerId"])),
+			lib.Text(lib.FormatMoney(lib.ParseMoney(lib.ToString(inv["totalAmount"])))),
+			lib.Int(0), lib.Int(now),
+		},
+	}
 }
 
 func transitionInvoice(db *lib.TursoClient, id string, from []string, to string) error {
@@ -219,12 +285,7 @@ func getInvoice(db *lib.TursoClient, id string) (map[string]interface{}, error) 
 	if len(res.Rows) == 0 {
 		return nil, errText("invoice not found")
 	}
-	row := res.Rows[0]
-	return map[string]interface{}{
-		"id": row[0], "invoiceNumber": row[1], "customerId": row[2],
-		"state": row[3], "totalAmount": row[4], "channel": row[5],
-		"dueDate": row[6], "notes": row[7], "createdAt": row[8], "updatedAt": row[9],
-	}, nil
+	return invoiceFromRow(res.Rows[0]), nil
 }
 
 func loadInvoice(db *lib.TursoClient, id string) (map[string]interface{}, error) {
@@ -281,10 +342,17 @@ func loadInvoice(db *lib.TursoClient, id string) (map[string]interface{}, error)
 }
 
 func bumpCatalog(db *lib.TursoClient, now int64) {
-	db.Execute("INSERT INTO catalog_meta (id, version, updated_at) VALUES (1, 1, ?) ON CONFLICT(id) DO UPDATE SET version = version + 1, updated_at = excluded.updated_at", lib.Int(now))
+	stmt := catalogMetaStmt(now)
+	db.Execute(stmt.SQL, stmt.Args...)
+}
+
+func catalogMetaStmt(now int64) lib.TursoStmt {
+	return lib.TursoStmt{
+		SQL:  "INSERT INTO catalog_meta (id, version, updated_at) VALUES (1, 1, ?) ON CONFLICT(id) DO UPDATE SET version = version + 1, updated_at = excluded.updated_at",
+		Args: []lib.TursoArg{lib.Int(now)},
+	}
 }
 
 type errText string
 
 func (e errText) Error() string { return string(e) }
-

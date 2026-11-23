@@ -18,6 +18,11 @@ CREATE TABLE IF NOT EXISTS agent_tokens (
   last_used_at INTEGER
 );
 
+-- Auth runs on every relay request; point lookups keep latency flat as the
+-- number of paired devices and agent tokens grows.
+CREATE INDEX IF NOT EXISTS idx_devices_token_hash ON devices(device_token_hash);
+CREATE INDEX IF NOT EXISTS idx_agent_tokens_token_hash ON agent_tokens(token_hash);
+
 -- Short-lived pairing codes created by the desktop agent and consumed once by
 -- the phone. A code is useless after expires_at or after used_at is set.
 CREATE TABLE IF NOT EXISTS pairing_sessions (

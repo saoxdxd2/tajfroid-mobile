@@ -55,6 +55,23 @@ const status = read('src/components/MutationStatus.vue')
 check('MutationStatus: device read path', status.includes('/api/devices/manage?id='))
 check('MutationStatus: hides applied rows', status.includes("i.status !== 'applied'"))
 
+// 6. Performance invariants: keep the lazy crypto chunk and pooled, batched
+// relay path from regressing during future byte/feature work.
+const queue = read('src/stores/queue.js')
+check('queue: sodium lazy import',
+  /await import\(['"]libsodium-wrappers['"]\)/.test(queue) &&
+  !/from\s+['"]libsodium-wrappers['"]/.test(queue))
+const turso = read('lib/turso.go')
+check('turso: pooled keep-alive client', /DisableKeepAlives = false/.test(turso) && /sync\.Map/.test(turso))
+check('turso: no blind write retry', /Never replay writes/.test(turso))
+check('turso: batch pipeline helper', turso.includes('ExecuteBatch'))
+const auth = read('lib/auth.go')
+check('auth: request-scoped identity', auth.includes('WithIdentity'))
+const router = read('api/router/index.go')
+check('router: single auth lookup per request', router.includes('lib.WithIdentity'))
+const catalog = read('handlers/agent/catalog/index.go')
+check('catalog: one-round-trip rebuild', catalog.includes('ExecuteBatch'))
+
 console.log(`PASS ${checks.length}`)
 for (const c of checks) console.log(`  ok   ${c}`)
 if (failures.length) {

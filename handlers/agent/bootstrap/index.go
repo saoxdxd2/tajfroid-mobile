@@ -28,6 +28,17 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	db := lib.NewTurso()
+	// Apply auth indexes on bootstrap so existing databases get flat token
+	// lookup latency without a separate migration/deploy step.
+	for _, ddl := range []string{
+		"CREATE INDEX IF NOT EXISTS idx_devices_token_hash ON devices(device_token_hash)",
+		"CREATE INDEX IF NOT EXISTS idx_agent_tokens_token_hash ON agent_tokens(token_hash)",
+	} {
+		if _, err := db.Execute(ddl); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
 	count, err := db.Execute("SELECT id FROM agent_tokens LIMIT 1")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

@@ -14,7 +14,7 @@
         </div>
         <div class="path">{{ m.path }}</div>
         <div v-if="m.lastError" class="err">{{ m.lastError }}</div>
-        <div v-if="m.conflict" class="conflict-box"><strong>Server conflict:</strong> <pre>{{ pretty(m.conflict) }}</pre></div>
+        <div v-if="m.conflict" class="conflict-box"><strong>Server conflict:</strong> <pre>{{ formatted[m.id]?.conflictBox }}</pre></div>
         <div v-if="m.status==='conflict'" class="actions">
           <button @click="fetchServer(m)">Load server for diff</button>
         </div>
@@ -24,11 +24,11 @@
         </details>
         <div v-if="server[m.id]" class="diff">
           <div class="diff-head"><strong>Field</strong><strong>Local</strong><strong>Server</strong><strong>Conflict</strong><strong>Use</strong></div>
-          <div v-for="k in diffKeys(m)" :key="k" class="diff-row">
+          <div v-for="k in diffKeysByItem[m.id] || []" :key="k" class="diff-row">
             <span class="k">{{ k }}</span>
-            <span class="v">{{ pretty(safeObj(edits[m.id])[k]) }}</span>
-            <span class="v">{{ pretty(server[m.id][k]) }}</span>
-            <span class="v">{{ pretty(conflictObj[m.id]?.[k]) }}</span>
+            <span class="v">{{ formatted[m.id]?.local?.[k] }}</span>
+            <span class="v">{{ formatted[m.id]?.server?.[k] }}</span>
+            <span class="v">{{ formatted[m.id]?.conflict?.[k] }}</span>
             <span class="pick">
               <label><input type="radio" :name="m.id+k" :checked="pickOf(m,k)==='local'" @change="choose(m.id,k,'local')">L</label>
               <label><input type="radio" :name="m.id+k" :checked="pickOf(m,k)==='server'" @change="choose(m.id,k,'server')">S</label>
@@ -75,13 +75,85 @@ const items = computed(() => store.items.filter(i => i.status !== 'applied'))
 const syncing = computed(() => store.syncing)
 const pending = computed(() => items.value.filter(i => i.status === 'pending').length)
 const conflicts = computed(() => items.value.filter(i => i.status === 'conflict').length)
-watch(items, (list) => { for (const m of list) if (edits[m.id] === undefined) edits[m.id] = pretty(m.body) }, { immediate: true, deep: true })
+
+// Parse/stringify once per change instead of on every render. Every map is
+// keyed by mutation id, so a single item's edit does not rework the others.
+function pretty(v) { try { return JSON.stringify(v ?? {}, null, 2) } catch { return String(v) } }
+
+const localParsed = computed(() => {
+  const out = {}
+  for (const id of Object.keys(edits)) {
+    try { out[id] = { ok: true, value: JSON.parse(edits[id] || '{}') } }
+    catch { out[id] = { ok: false, value: {} } }
+  }
+  return out
+})
+const localObjects = computed(() => {
+  const out = {}
+  for (const id of Object.keys(localParsed.value)) out[id] = localParsed.value[id].value || {}
+  return out
+})
+const serverObjects = computed(() => {
+  const out = {}
+  for (const id of Object.keys(server)) out[id] = server[id] || {}
+  return out
+})
+const conflictObjects = computed(() => {
+  const out = {}
+  for (const id of Object.keys(conflictObj)) out[id] = conflictObj[id] || {}
+  return out
+})
+
+const VALUE_TYPES = ['string', 'number', 'boolean', 'object']
+const diffKeysByItem = computed(() => {
+  const out = {}
+  for (const m of items.value) {
+    const l = localObjects.value[m.id] || {}
+    const s = serverObjects.value[m.id] || {}
+    const c = conflictObjects.value[m.id] || {}
+    out[m.id] = Array.from(new Set([...Object.keys(l), ...Object.keys(s), ...Object.keys(c)]))
+      .filter(k => VALUE_TYPES.includes(typeof l[k]) || VALUE_TYPES.includes(typeof s[k]) || VALUE_TYPES.includes(typeof c[k]))
+  }
+  return out
+})
+// Pre-rendered strings for the diff rows and conflict box: no JSON.stringify
+// calls left in the template's hot path.
+const formatted = computed(() => {
+  const out = {}
+  for (const m of items.value) {
+    const id = m.id
+    const l = localObjects.value[id] || {}
+    const s = serverObjects.value[id] || {}
+    const c = conflictObjects.value[id] || {}
+    const local = {}
+    const remote = {}
+    const conflict = {}
+    for (const k of diffKeysByItem.value[id] || []) {
+      local[k] = pretty(l[k])
+      remote[k] = pretty(s[k])
+      conflict[k] = pretty(c[k])
+    }
+    out[id] = { conflictBox: pretty(m.conflict), local, server: remote, conflict }
+  }
+  return out
+})
+
+// Only new ids need seeding; existing (possibly in-progress) edits are kept.
+// items is recomputed when the store's array changes, so a shallow watch is
+// sufficient and avoids walking every nested mutation object on each render.
+watch(items, (list) => {
+  for (const m of list) if (edits[m.id] === undefined) edits[m.id] = pretty(m.body)
+}, { immediate: true })
+
 function retry(id) { store.retry(id) }
 function remove(id) { store.remove(id) }
 function dismiss(id) { store.remove(id) }
-function pretty(v) { try { return JSON.stringify(v ?? {}, null, 2) } catch { return String(v) } }
 function isFlat(v) { return v && typeof v === 'object' && !Array.isArray(v) && Object.values(v).every(x => ['string','number','boolean'].includes(typeof x) || x === null) }
-function fieldValue(id,k,orig) { try { const o = JSON.parse(edits[id]||'{}'); return o[k] ?? '' } catch { return orig ?? '' } }
+function fieldValue(id,k,orig) {
+  const parsed = localParsed.value[id]
+  if (parsed && (!parsed.ok || parsed.value == null)) return orig ?? ''
+  return (parsed?.value?.[k]) ?? ''
+}
 function setField(id,k,val,orig) {
   let o = {}
   try { o = JSON.parse(edits[id] || '{}') } catch { o = {} }
@@ -140,11 +212,12 @@ async function fetchServer(m) {
     for (const k of diffKeys(m)) mergeSel[m.id][k] = mergeSel[m.id][k] || undefined
   } catch (e) { alert('Failed to load server: ' + e.message) }
 }
-function safeObj(s) { try { return JSON.parse(s||'{}') } catch { return {} } }
-function hasConflict(m,k) { const c = conflictObj[m.id]; return !!(c && Object.prototype.hasOwnProperty.call(c, k)) }
+function hasConflict(m,k) { const c = conflictObjects.value[m.id]; return !!(c && Object.prototype.hasOwnProperty.call(c, k)) }
 function pickOf(m,k) { const sel = mergeSel[m.id]; if (sel && sel[k]) return sel[k]; return autoPick(m,k) }
 function autoPick(m,k) {
-  const l = safeObj(edits[m.id])[k]; const s = server[m.id]?.[k]; const c = conflictObj[m.id]?.[k]
+  const l = (localObjects.value[m.id] || {})[k]
+  const s = (serverObjects.value[m.id] || {})[k]
+  const c = (conflictObjects.value[m.id] || {})[k]
   if (hasConflict(m,k)) {
     if (l === s) return 'server'
     if (c === s && l !== s) return 'conflict'
@@ -153,10 +226,7 @@ function autoPick(m,k) {
   if (l === s) return 'server'
   return 'local'
 }
-function diffKeys(m) {
-  const l = safeObj(edits[m.id]); const s = server[m.id] || {}; const c = conflictObj[m.id] || {}
-  return Array.from(new Set([...Object.keys(l), ...Object.keys(s), ...Object.keys(c)])).filter(k => ['string','number','boolean','object'].includes(typeof l[k]) || ['string','number','boolean','object'].includes(typeof s[k]) || ['string','number','boolean','object'].includes(typeof c[k]))
-}
+function diffKeys(m) { return diffKeysByItem.value[m.id] || [] }
 function choose(id,k,side) { mergeSel[id] = mergeSel[id] || {}; mergeSel[id][k] = side }
 function useServerPaste(m) {
   try {
@@ -167,9 +237,11 @@ function useServerPaste(m) {
   } catch (e) { alert('Invalid JSON: ' + e.message) }
 }
 async function applyMerge(m) {
-  const l = safeObj(edits[m.id]); const s = server[m.id] || {}; const c = conflictObj[m.id] || {}
+  const l = localObjects.value[m.id] || {}
+  const s = serverObjects.value[m.id] || {}
+  const c = conflictObjects.value[m.id] || {}
   const out = { ...l }
-  for (const k of diffKeys(m)) {
+  for (const k of diffKeysByItem.value[m.id] || []) {
     const pick = pickOf(m,k)
     out[k] = pick === 'server' ? s[k] : pick === 'conflict' ? c[k] : l[k]
   }

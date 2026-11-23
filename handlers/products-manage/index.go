@@ -58,40 +58,45 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		now := time.Now().Unix()
+		stmts := make([]lib.TursoStmt, 0, 10)
 		if body.Name != "" {
-			db.Execute("UPDATE catalog SET name=? WHERE sku=?", lib.Text(body.Name), lib.Text(sku))
+			stmts = append(stmts, lib.TursoStmt{SQL: "UPDATE catalog SET name=? WHERE sku=?", Args: []lib.TursoArg{lib.Text(body.Name), lib.Text(sku)}})
 		}
 		if body.Description != "" {
-			db.Execute("UPDATE catalog SET description=? WHERE sku=?", lib.Text(body.Description), lib.Text(sku))
+			stmts = append(stmts, lib.TursoStmt{SQL: "UPDATE catalog SET description=? WHERE sku=?", Args: []lib.TursoArg{lib.Text(body.Description), lib.Text(sku)}})
 		}
 		if body.PurchasePrice != "" {
-			db.Execute("UPDATE catalog SET purchase_price=? WHERE sku=?", lib.Text(body.PurchasePrice), lib.Text(sku))
+			stmts = append(stmts, lib.TursoStmt{SQL: "UPDATE catalog SET purchase_price=? WHERE sku=?", Args: []lib.TursoArg{lib.Text(body.PurchasePrice), lib.Text(sku)}})
 		}
 		if body.SalePrice != "" {
-			db.Execute("UPDATE catalog SET sale_price=? WHERE sku=?", lib.Text(body.SalePrice), lib.Text(sku))
+			stmts = append(stmts, lib.TursoStmt{SQL: "UPDATE catalog SET sale_price=? WHERE sku=?", Args: []lib.TursoArg{lib.Text(body.SalePrice), lib.Text(sku)}})
 		}
 		if body.VatRate != "" {
-			db.Execute("UPDATE catalog SET vat_rate=? WHERE sku=?", lib.Text(body.VatRate), lib.Text(sku))
+			stmts = append(stmts, lib.TursoStmt{SQL: "UPDATE catalog SET vat_rate=? WHERE sku=?", Args: []lib.TursoArg{lib.Text(body.VatRate), lib.Text(sku)}})
 		}
 		if body.Stock != nil {
-			db.Execute("UPDATE catalog SET stock=? WHERE sku=?", lib.Int(int64(*body.Stock)), lib.Text(sku))
+			stmts = append(stmts, lib.TursoStmt{SQL: "UPDATE catalog SET stock=? WHERE sku=?", Args: []lib.TursoArg{lib.Int(int64(*body.Stock)), lib.Text(sku)}})
 		}
 		if body.Active != nil {
 			a := 0
 			if *body.Active {
 				a = 1
 			}
-			db.Execute("UPDATE catalog SET active=? WHERE sku=?", lib.Int(int64(a)), lib.Text(sku))
+			stmts = append(stmts, lib.TursoStmt{SQL: "UPDATE catalog SET active=? WHERE sku=?", Args: []lib.TursoArg{lib.Int(int64(a)), lib.Text(sku)}})
 		}
 		if body.Category != "" {
-			db.Execute("UPDATE catalog SET category=? WHERE sku=?", lib.Text(body.Category), lib.Text(sku))
+			stmts = append(stmts, lib.TursoStmt{SQL: "UPDATE catalog SET category=? WHERE sku=?", Args: []lib.TursoArg{lib.Text(body.Category), lib.Text(sku)}})
 		}
 		if body.Brand != "" {
-			db.Execute("UPDATE catalog SET brand=? WHERE sku=?", lib.Text(body.Brand), lib.Text(sku))
+			stmts = append(stmts, lib.TursoStmt{SQL: "UPDATE catalog SET brand=? WHERE sku=?", Args: []lib.TursoArg{lib.Text(body.Brand), lib.Text(sku)}})
 		}
 		// catalog_meta.version is the sync cursor the phone agent polls; the
 		// catalog table itself has no updated_at column.
-		db.Execute("INSERT INTO catalog_meta (id, version, updated_at) VALUES (1, 1, ?) ON CONFLICT(id) DO UPDATE SET version = version + 1, updated_at = excluded.updated_at", lib.Int(now))
+		stmts = append(stmts, lib.TursoStmt{
+			SQL:  "INSERT INTO catalog_meta (id, version, updated_at) VALUES (1, 1, ?) ON CONFLICT(id) DO UPDATE SET version = version + 1, updated_at = excluded.updated_at",
+			Args: []lib.TursoArg{lib.Int(now)},
+		})
+		_, _ = db.ExecuteBatch(r.Context(), stmts...)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 
@@ -108,8 +113,14 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		}
 		// Archive (soft delete) — set active=0
 		now := time.Now().Unix()
-		db.Execute("UPDATE catalog SET active=0 WHERE sku=?", lib.Text(sku))
-		db.Execute("INSERT INTO catalog_meta (id, version, updated_at) VALUES (1, 1, ?) ON CONFLICT(id) DO UPDATE SET version = version + 1, updated_at = excluded.updated_at", lib.Int(now))
+		stmts := []lib.TursoStmt{
+			{SQL: "UPDATE catalog SET active=0 WHERE sku=?", Args: []lib.TursoArg{lib.Text(sku)}},
+			{
+				SQL:  "INSERT INTO catalog_meta (id, version, updated_at) VALUES (1, 1, ?) ON CONFLICT(id) DO UPDATE SET version = version + 1, updated_at = excluded.updated_at",
+				Args: []lib.TursoArg{lib.Int(now)},
+			},
+		}
+		_, _ = db.ExecuteBatch(r.Context(), stmts...)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 
@@ -117,7 +128,6 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
-
 
 func catalogVersion(db *lib.TursoClient) int64 {
 	res, err := db.Execute("SELECT version FROM catalog_meta WHERE id=1")

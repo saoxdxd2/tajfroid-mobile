@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -50,58 +51,72 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Debtors: invoiced (validated/issued/paid) minus payments, per customer.
-	invRes, err := db.Execute(`SELECT i.customer_id, c.company_name, i.id, i.total_amount
+	// Aggregate in SQL so both time and space scale with customers (C), not
+	// invoices/payments (I/P).
+	invRes, err := db.Execute(`SELECT i.customer_id, c.company_name, SUM(i.total_amount)
 		FROM invoices i LEFT JOIN customers c ON i.customer_id = c.id
-		WHERE i.state IN ('Validated','Issued','Paid')`)
+		WHERE i.state IN ('Validated','Issued','Paid')
+		GROUP BY i.customer_id, c.company_name`)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	type debtor struct {
-		name      string
-		invoiced  int64
-		paid      int64
-		invoiceIDs map[string]bool
+		name        string
+		invoiced    int64
+		paid        int64
+		outstanding int64
 	}
 	debtors := map[string]*debtor{}
 	for _, row := range invRes.Rows {
 		customerID := lib.ToString(row[0])
-		d := debtors[customerID]
-		if d == nil {
-			d = &debtor{name: lib.ToString(row[1]), invoiceIDs: map[string]bool{}}
-			debtors[customerID] = d
+		debtors[customerID] = &debtor{
+			name:     lib.ToString(row[1]),
+			invoiced: lib.ParseMoney(lib.ToString(row[2])),
 		}
-		d.invoiced += lib.ParseMoney(lib.ToString(row[3]))
-		d.invoiceIDs[lib.ToString(row[2])] = true
 	}
-	payRes, err := db.Execute("SELECT invoice_id, amount FROM payments")
+	payRes, err := db.Execute(`SELECT i.customer_id, SUM(p.amount)
+		FROM payments p JOIN invoices i ON p.invoice_id = i.id
+		WHERE i.state IN ('Validated','Issued','Paid')
+		GROUP BY i.customer_id`)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	paymentsByInvoice := map[string]int64{}
 	for _, row := range payRes.Rows {
-		paymentsByInvoice[lib.ToString(row[0])] += lib.ParseMoney(lib.ToString(row[1]))
+		if d := debtors[lib.ToString(row[0])]; d != nil {
+			d.paid = lib.ParseMoney(lib.ToString(row[1]))
+		}
 	}
-	debtorList := []map[string]interface{}{}
+
+	type debtorRow struct {
+		outstanding int64
+		data        map[string]interface{}
+	}
+	rows := make([]debtorRow, 0, len(debtors))
 	totalOutstanding := int64(0)
 	for customerID, d := range debtors {
-		for invoiceID := range d.invoiceIDs {
-			d.paid += paymentsByInvoice[invoiceID]
-		}
-		outstanding := d.invoiced - d.paid
-		if outstanding <= 0 {
+		d.outstanding = d.invoiced - d.paid
+		if d.outstanding <= 0 {
 			continue
 		}
-		totalOutstanding += outstanding
-		debtorList = append(debtorList, map[string]interface{}{
-			"customerId": customerID, "companyName": d.name,
-			"totalInvoiced": lib.FormatMoney(d.invoiced),
-			"totalPaid":     lib.FormatMoney(d.paid),
-			"outstanding":   lib.FormatMoney(outstanding),
+		totalOutstanding += d.outstanding
+		rows = append(rows, debtorRow{
+			outstanding: d.outstanding,
+			data: map[string]interface{}{
+				"customerId": customerID, "companyName": d.name,
+				"totalInvoiced": lib.FormatMoney(d.invoiced),
+				"totalPaid":     lib.FormatMoney(d.paid),
+				"outstanding":   lib.FormatMoney(d.outstanding),
+			},
 		})
 	}
-	sortDebtors(debtorList)
+	// O(C log C) with integer cents; no ParseMoney inside comparisons.
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].outstanding > rows[j].outstanding })
+	debtorList := make([]map[string]interface{}, 0, len(rows))
+	for _, r := range rows {
+		debtorList = append(debtorList, r.data)
+	}
 
 	// Checks due in the next 7 days, including overdue pending ones.
 	horizon := now.AddDate(0, 0, 7).Unix()
@@ -122,13 +137,13 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"start": start, "end": end,
-		"inflow":  lib.FormatMoney(inflow),
-		"outflow": lib.FormatMoney(outflow),
-		"net":     lib.FormatMoney(inflow - outflow),
-		"breakdown": toStringMap(breakdown),
-		"debtors": debtorList,
+		"inflow":           lib.FormatMoney(inflow),
+		"outflow":          lib.FormatMoney(outflow),
+		"net":              lib.FormatMoney(inflow - outflow),
+		"breakdown":        toStringMap(breakdown),
+		"debtors":          debtorList,
 		"totalOutstanding": lib.FormatMoney(totalOutstanding),
-		"upcomingChecks": upcoming,
+		"upcomingChecks":   upcoming,
 	})
 }
 
@@ -142,17 +157,4 @@ func toStringMap(m map[string]int64) map[string]string {
 		out[k] = lib.FormatMoney(v)
 	}
 	return out
-}
-
-func sortDebtors(items []map[string]interface{}) {
-	for i := 1; i < len(items); i++ {
-		for j := i; j > 0; j-- {
-			a := lib.ParseMoney(lib.ToString(items[j-1]["outstanding"]))
-			b := lib.ParseMoney(lib.ToString(items[j]["outstanding"]))
-			if a >= b {
-				break
-			}
-			items[j-1], items[j] = items[j], items[j-1]
-		}
-	}
 }

@@ -30,7 +30,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "clientId required", http.StatusBadRequest)
 			return
 		}
-		ident, _ := lib.Authenticate(r)
+		ident := requestIdentity(r)
 		deviceID := ident.ID
 		if ident.Kind == "device" && deviceID != "" {
 			// ok
@@ -106,7 +106,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 				since = n
 			}
 		}
-		ident, _ := lib.Authenticate(r)
+		ident := requestIdentity(r)
 		q := `SELECT id, client_id, status, purchase_reference, message, updated_at, size_bytes
 			FROM scans WHERE updated_at > ?`
 		args := []lib.TursoArg{lib.Int(since)}
@@ -139,6 +139,16 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// requestIdentity uses the router's single auth lookup. The fallback keeps
+// direct handler calls (tests/local tools) working without a router wrapper.
+func requestIdentity(r *http.Request) lib.Identity {
+	if id, ok := lib.IdentityFrom(r); ok {
+		return id
+	}
+	id, _ := lib.Authenticate(r)
+	return id
 }
 
 func nullableText(s string) lib.TursoArg {

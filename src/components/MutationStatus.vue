@@ -95,6 +95,8 @@ function readPathFor(m) {
     invoice: `/api/invoices/manage?id=${id}`,
     purchase: `/api/purchases/manage?id=${id}`,
     product: `/api/products/manage?sku=${id}`,
+    category: `/api/categories/manage?id=${id}`,
+    brand: `/api/brands/manage?id=${id}`,
   }
   return map[m.entity] || null
 }

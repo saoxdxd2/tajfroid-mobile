@@ -17,6 +17,16 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch r.Method {
+	case http.MethodGet:
+		res, err := db.Execute("SELECT id, name, created_at, updated_at FROM brands WHERE id=?", lib.Text(id))
+		if err != nil || len(res.Rows) == 0 {
+			http.Error(w, "brand not found", http.StatusNotFound)
+			return
+		}
+		row := res.Rows[0]
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"id": row[0], "name": row[1], "createdAt": row[2], "updatedAt": row[3]})
+
 	case http.MethodPut:
 		var body struct {
 			Name          string `json:"name"`

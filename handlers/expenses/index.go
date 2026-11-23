@@ -47,12 +47,20 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var body struct {
+			ID          string `json:"id"` // optional client idempotency key
 			Reference   string `json:"reference"`
 			Category    string `json:"category"`
 			Description string `json:"description"`
 			Amount      string `json:"amount"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
+		if body.ID != "" {
+			if ex, err := db.Execute("SELECT id, reference FROM expenses WHERE id=?", lib.Text(body.ID)); err == nil && len(ex.Rows) > 0 {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{"id": body.ID, "reference": ex.Rows[0][1], "idempotent": true})
+				return
+			}
+		}
 		if strings.TrimSpace(body.Description) == "" {
 			http.Error(w, "description required", http.StatusBadRequest)
 			return
@@ -73,7 +81,10 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		if reference == "" {
 			reference = nextExpenseReference(db)
 		}
-		id := lib.NewID()
+		id := body.ID
+		if id == "" {
+			id = lib.NewID()
+		}
 		now := time.Now().Unix()
 		_, err := db.Execute(`INSERT INTO expenses
 			(id, reference, category, description, amount, is_archived, created_at, updated_at)

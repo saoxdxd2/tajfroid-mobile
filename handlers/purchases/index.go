@@ -38,6 +38,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var body struct {
+			ID               string `json:"id"` // optional client idempotency key
 			SupplierID       string `json:"supplierId"`
 			Reference        string `json:"reference"`
 			PurchaseDate     int64  `json:"purchaseDate"`
@@ -45,6 +46,13 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			SourceFileName   string `json:"sourceFileName"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
+		if body.ID != "" {
+			if ex, err := db.Execute("SELECT id, reference FROM purchases WHERE id=?", lib.Text(body.ID)); err == nil && len(ex.Rows) > 0 {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{"id": body.ID, "reference": ex.Rows[0][1], "idempotent": true})
+				return
+			}
+		}
 		if body.SupplierID == "" {
 			http.Error(w, "supplierId required", http.StatusBadRequest)
 			return
@@ -62,7 +70,10 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		id := lib.NewID()
+		id := body.ID
+		if id == "" {
+			id = lib.NewID()
+		}
 		now := time.Now().Unix()
 		_, err = db.Execute(`INSERT INTO purchases
 			(id, reference, supplier_id, state, total_amount, purchase_date, supplier_invoice_no, source_file_name, created_at, updated_at)

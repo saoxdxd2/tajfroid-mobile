@@ -41,8 +41,10 @@ export const usePurchaseStore = defineStore('purchases', () => {
   }
 
   async function create(payload) {
+    const body = { ...payload }
+    if (!body.id) body.id = crypto.randomUUID()
     const res = await apiFetch('/api/purchases', {
-      method: 'POST', headers: jsonHeaders(), body: JSON.stringify(payload),
+      method: 'POST', headers: jsonHeaders(), body: JSON.stringify(body),
     })
     if (!res.ok) throw new Error(await readError(res, 'Failed to create purchase'))
     const data = await res.json()

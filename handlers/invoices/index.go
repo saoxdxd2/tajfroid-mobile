@@ -54,12 +54,20 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var body struct {
+			ID         string `json:"id"` // optional client idempotency key
 			CustomerID string `json:"customerId"`
 			Channel    string `json:"channel"`
 			Notes      string `json:"notes"`
 			DueDate    int64  `json:"dueDate"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
+		if body.ID != "" {
+			if ex, err := db.Execute("SELECT id, invoice_number FROM invoices WHERE id=?", lib.Text(body.ID)); err == nil && len(ex.Rows) > 0 {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{"id": body.ID, "invoiceNumber": ex.Rows[0][1], "idempotent": true})
+				return
+			}
+		}
 		channel := body.Channel
 		if channel == "" {
 			channel = "mobile_app"
@@ -83,7 +91,10 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "customer not found", http.StatusNotFound)
 			return
 		}
-		id := lib.NewID()
+		id := body.ID
+		if id == "" {
+			id = lib.NewID()
+		}
 		now := time.Now().Unix()
 		invNum := ""
 		var insertErr error

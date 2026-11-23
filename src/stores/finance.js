@@ -41,8 +41,10 @@ export const useFinanceStore = defineStore('finance', () => {
   }
 
   async function createCheck(payload) {
+    const body = { ...payload }
+    if (!body.id) body.id = crypto.randomUUID()
     const res = await apiFetch('/api/checks', {
-      method: 'POST', headers: jsonHeaders(), body: JSON.stringify(payload),
+      method: 'POST', headers: jsonHeaders(), body: JSON.stringify(body),
     })
     if (!res.ok) throw new Error(await readError(res, 'Failed to create check'))
     await fetchChecks()
@@ -73,8 +75,10 @@ export const useFinanceStore = defineStore('finance', () => {
   }
 
   async function createExpense(payload) {
+    const body = { ...payload }
+    if (!body.id) body.id = crypto.randomUUID()
     const res = await apiFetch('/api/expenses', {
-      method: 'POST', headers: jsonHeaders(), body: JSON.stringify(payload),
+      method: 'POST', headers: jsonHeaders(), body: JSON.stringify(body),
     })
     if (!res.ok) throw new Error(await readError(res, 'Failed to create expense'))
     await fetchExpenses()

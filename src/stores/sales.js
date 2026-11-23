@@ -41,8 +41,10 @@ export const useSalesStore = defineStore('sales', () => {
   }
 
   async function createInvoice(payload) {
+    const body = { ...payload }
+    if (!body.id) body.id = crypto.randomUUID()
     const res = await apiFetch('/api/invoices', {
-      method: 'POST', headers: jsonHeaders(), body: JSON.stringify(payload),
+      method: 'POST', headers: jsonHeaders(), body: JSON.stringify(body),
     })
     if (!res.ok) throw new Error(await readError(res, 'Failed to create invoice'))
     const data = await res.json()

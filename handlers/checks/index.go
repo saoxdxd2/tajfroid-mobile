@@ -43,6 +43,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var body struct {
+			ID          string `json:"id"` // optional client idempotency key
 			CheckNumber string `json:"checkNumber"`
 			Direction   string `json:"direction"`
 			Amount      string `json:"amount"`
@@ -54,6 +55,13 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			Notes       string `json:"notes"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
+		if body.ID != "" {
+			if ex, err := db.Execute("SELECT id FROM checks WHERE id=?", lib.Text(body.ID)); err == nil && len(ex.Rows) > 0 {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{"id": body.ID, "idempotent": true})
+				return
+			}
+		}
 		if strings.TrimSpace(body.CheckNumber) == "" {
 			http.Error(w, "check number is required", http.StatusBadRequest)
 			return
@@ -102,7 +110,10 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 				partyName = lib.ToString(res.Rows[0][0])
 			}
 		}
-		id := lib.NewID()
+		id := body.ID
+		if id == "" {
+			id = lib.NewID()
+		}
 		now := time.Now().Unix()
 		_, err := db.Execute(`INSERT INTO checks
 			(id, check_number, direction, status, amount, due_date, bank, party_name, customer_id, supplier_id, notes, created_at, updated_at)

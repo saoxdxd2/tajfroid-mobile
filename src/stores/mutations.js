@@ -52,6 +52,9 @@ async function idbDel(id) {
   })
 }
 
+let seqCounter = 0
+function nextSeq() { return ++seqCounter }
+
 export const useMutationStore = defineStore('mutations', () => {
   const items = ref([])
   const syncing = ref(false)
@@ -59,17 +62,24 @@ export const useMutationStore = defineStore('mutations', () => {
 
   async function load() {
     const all = await idbAll()
-    all.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+    // Replay-safe ordered processing: sequential by seq (assigned on enqueue/recordConflict).
+    all.sort((a, b) => (a.seq || 0) - (b.seq || 0))
     items.value = all
   }
 
-  async function enqueue({ method, path, body, entity, entityId, baseUpdatedAt }) {
+  async function enqueue({ method, path, body, entity, entityId, baseUpdatedAt, idempotencyKey }) {
+    const key = idempotencyKey || (body && typeof body === 'object' ? body.id : null)
+    if (key && items.value.some(x => x.idempotencyKey === key && (x.status === 'applied' || x.status === 'pending' || x.status === 'conflict'))) {
+      return items.value.find(x => x.idempotencyKey === key).id // idempotent replay: already tracked
+    }
     const item = {
       id: crypto.randomUUID(),
+      seq: nextSeq(),
+      idempotencyKey: key || null,
       method, path, body: body ?? null,
       entity: entity || null, entityId: entityId || null,
       baseUpdatedAt: baseUpdatedAt || null,
-      status: 'pending', attempts: 0, lastError: null,
+      status: 'pending', attempts: 0, lastError: null, serverId: null,
       createdAt: Date.now(), updatedAt: Date.now(),
     }
     await idbPut(item)
@@ -85,13 +95,18 @@ export const useMutationStore = defineStore('mutations', () => {
     lastError.value = ''
     try {
       const all = await idbAll()
-      const pending = all.filter(x => x.status === 'pending' || x.status === 'conflict')
+      // Replay-safe ordering: process in seq order; applied items stay stored for idempotent replay.
+      const pending = all.filter(x => x.status === 'pending' || x.status === 'conflict').sort((a, b) => (a.seq || 0) - (b.seq || 0))
       for (const item of pending) {
         try {
           const headers = { 'Content-Type': 'application/json' }
           // Optimistic concurrency: send baseUpdatedAt if present.
           const payload = item.body && typeof item.body === 'object' ? { ...item.body } : item.body
           if (payload && item.baseUpdatedAt) payload.baseUpdatedAt = item.baseUpdatedAt
+          // Idempotent replay: skip POST creates whose idempotencyKey already applied/conflict with a serverId.
+          if (item.method === 'POST' && item.idempotencyKey && item.serverId) {
+            continue
+          }
           const res = await apiFetch(item.path, {
             method: item.method,
             headers,
@@ -106,8 +121,10 @@ export const useMutationStore = defineStore('mutations', () => {
             continue
           }
           if (!res.ok) throw new Error(await readError(res, `HTTP ${res.status}`))
-          await idbDel(item.id)
-          items.value = items.value.filter(x => x.id !== item.id)
+          const data = await res.json().catch(() => null)
+          const serverId = (data && (data.id || data.sku)) || item.serverId || null
+          const next = { ...item, status: 'applied', serverId, lastError: null, updatedAt: Date.now() }
+          await idbPut(next); replace(next)
         } catch (e) {
           const next = { ...item, status: 'pending', lastError: e.message || String(e), attempts: (item.attempts||0)+1, updatedAt: Date.now() }
           await idbPut(next); replace(next)
@@ -145,19 +162,11 @@ export const useMutationStore = defineStore('mutations', () => {
     await idbPut(next); replace(next)
   }
 
-  async function recordConflict({ method, path, body, entity, entityId, baseUpdatedAt, conflict, error }) {
-    const item = {
-      id: crypto.randomUUID(), method, path, body: body ?? null,
-      entity: entity || null, entityId: entityId || null,
-      baseUpdatedAt: baseUpdatedAt || null,
-      status: 'conflict', attempts: 0,
-      lastError: error || conflict?.error || 'Conflict',
-      conflict: conflict || null,
-      createdAt: Date.now(), updatedAt: Date.now(),
-    }
-    await idbPut(item); items.value.push(item)
-    return item.id
+  function statusCounts() {
+    const c = { pending: 0, conflict: 0, applied: 0 }
+    for (const x of items.value) c[x.status] = (c[x.status] || 0) + 1
+    return c
   }
 
-  return { items, syncing, lastError, load, enqueue, flush, remove, retry, updateBody, recordConflict }
+  return { items, syncing, lastError, load, enqueue, flush, remove, retry, updateBody, recordConflict, statusCounts }
 })

@@ -121,9 +121,19 @@ export const useInventoryStore = defineStore('inventory', () => {
     await fetchCategories()
   }
 
-  async function deleteCategory(id) {
-    const res = await apiFetch(`/api/categories/manage?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
-    if (!res.ok) throw new Error('Failed to delete category')
+  async function deleteCategory(id, baseUpdatedAt) {
+    const q = baseUpdatedAt ? `&baseUpdatedAt=${encodeURIComponent(baseUpdatedAt)}` : ''
+    try {
+      const res = await apiFetch(`/api/categories/manage?id=${encodeURIComponent(id)}${q}`, { method: 'DELETE' })
+      if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e }
+      if (!res.ok) throw new Error('Failed to delete category')
+    } catch (e) {
+      if (!e.conflict && (!navigator.onLine || e instanceof TypeError)) {
+        await useMutationStore().enqueue({ method: 'DELETE', path: `/api/categories/manage?id=${encodeURIComponent(id)}${q}`, body: null, entity: 'category', entityId: id, baseUpdatedAt })
+        return
+      }
+      throw e
+    }
     await fetchCategories()
   }
 
@@ -147,9 +157,19 @@ export const useInventoryStore = defineStore('inventory', () => {
     await fetchBrands()
   }
 
-  async function deleteBrand(id) {
-    const res = await apiFetch(`/api/brands/manage?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
-    if (!res.ok) throw new Error('Failed to delete brand')
+  async function deleteBrand(id, baseUpdatedAt) {
+    const q = baseUpdatedAt ? `&baseUpdatedAt=${encodeURIComponent(baseUpdatedAt)}` : ''
+    try {
+      const res = await apiFetch(`/api/brands/manage?id=${encodeURIComponent(id)}${q}`, { method: 'DELETE' })
+      if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict'); e.conflict=true; e.current=d; throw e }
+      if (!res.ok) throw new Error('Failed to delete brand')
+    } catch (e) {
+      if (!e.conflict && (!navigator.onLine || e instanceof TypeError)) {
+        await useMutationStore().enqueue({ method: 'DELETE', path: `/api/brands/manage?id=${encodeURIComponent(id)}${q}`, body: null, entity: 'brand', entityId: id, baseUpdatedAt })
+        return
+      }
+      throw e
+    }
     await fetchBrands()
   }
 

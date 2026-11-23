@@ -109,5 +109,49 @@ CREATE TABLE IF NOT EXISTS suppliers (
   updated_at INTEGER NOT NULL
 );
 
+
+-- Invoices
+CREATE TABLE IF NOT EXISTS invoices (
+  id TEXT PRIMARY KEY,
+  invoice_number TEXT NOT NULL UNIQUE,
+  customer_id TEXT NOT NULL REFERENCES customers(id),
+  state TEXT NOT NULL DEFAULT 'Draft',
+  total_amount TEXT NOT NULL DEFAULT '0',
+  channel TEXT NOT NULL DEFAULT 'store',
+  due_date INTEGER,
+  notes TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+-- Invoice items
+CREATE TABLE IF NOT EXISTS invoice_items (
+  id TEXT PRIMARY KEY,
+  invoice_id TEXT NOT NULL REFERENCES invoices(id),
+  product_sku TEXT NOT NULL,
+  product_name TEXT,
+  quantity INTEGER NOT NULL DEFAULT 1,
+  unit_price TEXT NOT NULL DEFAULT '0',
+  vat_rate TEXT NOT NULL DEFAULT '20',
+  unit_cost TEXT NOT NULL DEFAULT '0',
+  warranty_months INTEGER NOT NULL DEFAULT 12,
+  description_override TEXT,
+  warranty_end_date INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+-- Payments
+CREATE TABLE IF NOT EXISTS payments (
+  id TEXT PRIMARY KEY,
+  invoice_id TEXT NOT NULL REFERENCES invoices(id),
+  method TEXT NOT NULL DEFAULT 'Cash',
+  amount TEXT NOT NULL DEFAULT '0',
+  reference TEXT,
+  notes TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(status);
 CREATE INDEX IF NOT EXISTS idx_scans_device ON scans(device_id);

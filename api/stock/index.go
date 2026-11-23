@@ -49,7 +49,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		now := time.Now().Unix()
-		db.Execute("UPDATE catalog SET stock=?, updated_at=? WHERE sku=?", lib.Int(int64(newStock)), lib.Int(now), lib.Text(body.SKU))
+		db.Execute("UPDATE catalog SET stock=? WHERE sku=?", lib.Int(int64(newStock)), lib.Text(body.SKU))
 		db.Execute("INSERT INTO catalog_meta (id, version, updated_at) VALUES (1, 1, ?) ON CONFLICT(id) DO UPDATE SET version = version + 1, updated_at = excluded.updated_at", lib.Int(now))
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{"sku": body.SKU, "oldStock": current, "newStock": newStock})

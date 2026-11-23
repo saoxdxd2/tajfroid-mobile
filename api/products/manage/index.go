@@ -76,7 +76,8 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		if body.Brand != "" {
 			db.Execute("UPDATE catalog SET brand=? WHERE sku=?", lib.Text(body.Brand), lib.Text(sku))
 		}
-		db.Execute("UPDATE catalog SET updated_at=? WHERE sku=?", lib.Int(now), lib.Text(sku))
+		// catalog_meta.version is the sync cursor the phone agent polls; the
+		// catalog table itself has no updated_at column.
 		db.Execute("INSERT INTO catalog_meta (id, version, updated_at) VALUES (1, 1, ?) ON CONFLICT(id) DO UPDATE SET version = version + 1, updated_at = excluded.updated_at", lib.Int(now))
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
@@ -84,7 +85,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		// Archive (soft delete) — set active=0
 		now := time.Now().Unix()
-		db.Execute("UPDATE catalog SET active=0, updated_at=? WHERE sku=?", lib.Int(now), lib.Text(sku))
+		db.Execute("UPDATE catalog SET active=0 WHERE sku=?", lib.Text(sku))
 		db.Execute("INSERT INTO catalog_meta (id, version, updated_at) VALUES (1, 1, ?) ON CONFLICT(id) DO UPDATE SET version = version + 1, updated_at = excluded.updated_at", lib.Int(now))
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]bool{"ok": true})

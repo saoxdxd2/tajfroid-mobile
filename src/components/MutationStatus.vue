@@ -15,7 +15,13 @@
         <div class="path">{{ m.path }}</div>
         <div v-if="m.lastError" class="err">{{ m.lastError }}</div>
         <div v-if="m.conflict" class="conflict-box"><strong>Server conflict:</strong> <pre>{{ pretty(m.conflict) }}</pre></div>
-        <div v-if="m.status==='conflict'" class="actions"><button @click="fetchServer(m)">Load server for diff</button></div>
+        <div v-if="m.status==='conflict'" class="actions">
+          <button @click="fetchServer(m)">Load server for diff</button>
+        </div>
+        <details v-if="m.status==='conflict'" class="payload"><summary>Paste server JSON for merge</summary>
+          <textarea v-model="serverPaste[m.id]" rows="4" class="edit" placeholder='{"field":"serverValue"}'></textarea>
+          <div class="actions"><button @click="useServerPaste(m)">Use pasted server JSON</button></div>
+        </details>
         <div v-if="server[m.id]" class="diff">
           <div class="diff-head"><strong>Field</strong><strong>Local</strong><strong>Server</strong><strong>Use</strong></div>
           <div v-for="k in diffKeys(m)" :key="k" class="diff-row">
@@ -60,6 +66,7 @@ const open = ref(false)
 const edits = reactive({})
 const server = reactive({})
 const mergeSel = reactive({})
+const serverPaste = reactive({})
 const items = computed(() => store.items)
 const syncing = computed(() => store.syncing)
 const pending = computed(() => items.value.filter(i => i.status === 'pending').length)
@@ -121,6 +128,14 @@ function diffKeys(m) {
   return Array.from(new Set([...Object.keys(l), ...Object.keys(s)])).filter(k => ['string','number','boolean','object'].includes(typeof l[k]) || ['string','number','boolean','object'].includes(typeof s[k]))
 }
 function choose(id,k,side) { mergeSel[id] = mergeSel[id] || {}; mergeSel[id][k] = side }
+function useServerPaste(m) {
+  try {
+    server[m.id] = JSON.parse(serverPaste[m.id] || '{}')
+    const local = safeObj(edits[m.id]); const s = server[m.id] || {}
+    mergeSel[m.id] = mergeSel[m.id] || {}
+    for (const k of diffKeys(m)) mergeSel[m.id][k] = mergeSel[m.id][k] || 'local'
+  } catch (e) { alert('Invalid JSON: ' + e.message) }
+}
 async function applyMerge(m) {
   const l = safeObj(edits[m.id]); const s = server[m.id] || {}; const sel = mergeSel[m.id] || {}
   const out = { ...l }

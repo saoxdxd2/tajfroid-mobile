@@ -16,9 +16,9 @@ import (
 	agentcatalog "tajfroid-mobile/handlers/agent/catalog"
 	agentheartbeat "tajfroid-mobile/handlers/agent/heartbeat"
 	agentpairing "tajfroid-mobile/handlers/agent/pairing"
-	agentscans "tajfroid-mobile/handlers/agent/scans"
 	agentscanfile "tajfroid-mobile/handlers/agent/scan_file"
 	agentscanstatus "tajfroid-mobile/handlers/agent/scan_status"
+	agentscans "tajfroid-mobile/handlers/agent/scans"
 	brands "tajfroid-mobile/handlers/brands"
 	brandsmanage "tajfroid-mobile/handlers/brands-manage"
 	catalog "tajfroid-mobile/handlers/catalog"
@@ -47,6 +47,7 @@ import (
 	stock "tajfroid-mobile/handlers/stock"
 	suppliers "tajfroid-mobile/handlers/suppliers"
 	suppliersmanage "tajfroid-mobile/handlers/suppliers-manage"
+	"tajfroid-mobile/lib"
 )
 
 func Handler(w http.ResponseWriter, r *http.Request) {
@@ -59,6 +60,17 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		route = strings.TrimPrefix(route, "/")
 	}
 	route = strings.Trim(route, "/")
+
+	// Public endpoints: health is the uptime probe; pair consumes a one-time
+	// code; agent/bootstrap only works while no agent is registered. Every
+	// other route requires a paired device or agent token.
+	switch route {
+	case "health", "pair", "agent/bootstrap":
+	default:
+		if !lib.RequireAuth(w, r) {
+			return
+		}
+	}
 
 	// Dynamic agent scan routes: /api/agent/scans/{id}/status|file
 	if strings.HasPrefix(route, "agent/scans/") {

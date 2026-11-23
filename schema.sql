@@ -13,8 +13,20 @@ CREATE TABLE IF NOT EXISTS devices (
 CREATE TABLE IF NOT EXISTS agent_tokens (
   id TEXT PRIMARY KEY,
   token_hash TEXT NOT NULL,
+  device_id TEXT,
   created_at INTEGER NOT NULL,
   last_used_at INTEGER
+);
+
+-- Short-lived pairing codes created by the desktop agent and consumed once by
+-- the phone. A code is useless after expires_at or after used_at is set.
+CREATE TABLE IF NOT EXISTS pairing_sessions (
+  id TEXT PRIMARY KEY,
+  code TEXT NOT NULL,
+  device_id TEXT,
+  expires_at INTEGER NOT NULL,
+  used_at INTEGER,
+  created_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS catalog_meta (

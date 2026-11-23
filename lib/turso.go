@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -23,10 +24,20 @@ func NewTurso() *TursoClient {
 	if len(url) > 9 && url[:9] == "libsql://" {
 		url = "https://" + url[9:]
 	}
+	// Turso's HTTP endpoint sometimes closes a keep-alive connection between
+	// pipeline calls. Go refuses to replay a POST, so a reused dead connection
+	// surfaces as "Post ...: EOF" mid-handler (a handler issuing several
+	// queries then fails). A fresh connection per query is a few milliseconds
+	// slower but removes that whole class of intermittent 500s.
+	transport := &http.Transport{
+		DisableKeepAlives:   true,
+		ForceAttemptHTTP2:   false,
+		MaxIdleConnsPerHost: 1,
+	}
 	return &TursoClient{
 		URL:   url,
 		Token: token,
-		HTTP:  &http.Client{Timeout: 30 * time.Second},
+		HTTP:  &http.Client{Timeout: 30 * time.Second, Transport: transport},
 	}
 }
 
@@ -36,7 +47,7 @@ type TursoArg struct {
 }
 
 type TursoStmt struct {
-	SQL  string      `json:"sql"`
+	SQL  string     `json:"sql"`
 	Args []TursoArg `json:"args,omitempty"`
 }
 
@@ -55,8 +66,9 @@ type TursoColumn struct {
 }
 
 type TursoResult struct {
-	Columns []TursoColumn   `json:"columns"`
-	Rows    [][]interface{} `json:"rows"`
+	Columns          []TursoColumn   `json:"columns"`
+	Rows             [][]interface{} `json:"rows"`
+	AffectedRowCount int64           `json:"affected_row_count"`
 }
 
 type TursoResponse struct {
@@ -76,29 +88,46 @@ func (c *TursoClient) Execute(sql string, args ...TursoArg) (TursoResult, error)
 		Requests: []TursoRequest{{Type: "execute", Stmt: TursoStmt{SQL: sql, Args: args}}},
 	}
 	b, _ := json.Marshal(body)
-	req, err := http.NewRequest("POST", c.URL+"/v2/pipeline", bytes.NewReader(b))
-	if err != nil {
-		return TursoResult{}, err
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		req, err := http.NewRequest("POST", c.URL+"/v2/pipeline", bytes.NewReader(b))
+		if err != nil {
+			return TursoResult{}, err
+		}
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := c.HTTP.Do(req)
+		if err != nil {
+			lastErr = err
+			if attempt == 0 && isRetryable(err) {
+				time.Sleep(50 * time.Millisecond)
+				continue
+			}
+			return TursoResult{}, err
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		var tr TursoResponse
+		if err := json.Unmarshal(raw, &tr); err != nil {
+			return TursoResult{}, fmt.Errorf("parse: %w (%s)", err, string(raw))
+		}
+		if len(tr.Results) == 0 {
+			return TursoResult{}, fmt.Errorf("no results: %s", string(raw))
+		}
+		if tr.Results[0].Error != nil {
+			return TursoResult{}, fmt.Errorf("sql error: %s", tr.Results[0].Error.Message)
+		}
+		return tr.Results[0].Response.Result, nil
 	}
-	req.Header.Set("Authorization", "Bearer "+c.Token)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return TursoResult{}, err
+	return TursoResult{}, lastErr
+}
+
+func isRetryable(err error) bool {
+	if err == nil {
+		return false
 	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	var tr TursoResponse
-	if err := json.Unmarshal(raw, &tr); err != nil {
-		return TursoResult{}, fmt.Errorf("parse: %w (%s)", err, string(raw))
-	}
-	if len(tr.Results) == 0 {
-		return TursoResult{}, fmt.Errorf("no results: %s", string(raw))
-	}
-	if tr.Results[0].Error != nil {
-		return TursoResult{}, fmt.Errorf("sql error: %s", tr.Results[0].Error.Message)
-	}
-	return tr.Results[0].Response.Result, nil
+	msg := err.Error()
+	return strings.Contains(msg, "EOF") || strings.Contains(msg, "connection reset") || strings.Contains(msg, "broken pipe")
 }
 
 func Text(v string) TursoArg { return TursoArg{Type: "text", Value: v} }

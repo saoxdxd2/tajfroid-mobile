@@ -111,12 +111,15 @@ export const useInventoryStore = defineStore('inventory', () => {
     await fetchBrands()
   }
 
-  async function adjustStock(sku, change) {
+  async function adjustStock(sku, change, baseStock) {
+    const body = { sku, change }
+    if (baseStock !== undefined && baseStock !== null) body.baseStock = baseStock
     const res = await apiFetch('/api/stock', {
       method: 'POST',
       headers: jsonHeaders(),
-      body: JSON.stringify({ sku, delta }),
+      body: JSON.stringify(body),
     })
+    if (res.status === 409) { const d = await res.json().catch(()=>({})); const e = new Error(d.error||'Conflict: stock changed'); e.conflict=true; e.current=d; throw e }
     if (!res.ok) {
       const d = await res.json().catch(() => ({}))
       throw new Error(d.error || 'Failed to adjust stock')

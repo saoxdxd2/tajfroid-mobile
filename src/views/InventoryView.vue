@@ -175,9 +175,11 @@ async function remove(sku) {
 
 async function quickAdjust(p, delta) {
   try {
-    await store.adjustStock(p.sku, delta)
+    await store.adjustStock(p.sku, delta, p.stock)
   } catch (e) {
-    alert('Error: ' + e.message)
+    if (e.conflict) alert('Conflict: stock changed on another device. Refreshing.')
+    else alert('Error: ' + e.message)
+    await store.fetchProducts()
   }
 }
 </script>

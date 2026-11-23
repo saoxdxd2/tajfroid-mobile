@@ -28,6 +28,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var body struct {
+			ID                string `json:"id"` // optional client idempotency key
 			InvoiceID         string `json:"invoiceId"`
 			ProductSKU        string `json:"productSku"`
 			ProductName       string `json:"productName"`
@@ -39,6 +40,13 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			DescriptionOverride string `json:"descriptionOverride"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
+		if body.ID != "" {
+			if ex, err := db.Execute("SELECT id FROM invoice_items WHERE id=?", lib.Text(body.ID)); err == nil && len(ex.Rows) > 0 {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{"id": body.ID, "idempotent": true})
+				return
+			}
+		}
 		if body.InvoiceID == "" || body.ProductSKU == "" {
 			http.Error(w, "invoiceId and productSku required", http.StatusBadRequest)
 			return
@@ -92,7 +100,10 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		if warranty == 0 {
 			warranty = 12
 		}
-		id := lib.NewID()
+		id := body.ID
+		if id == "" {
+			id = lib.NewID()
+		}
 		now := time.Now().Unix()
 		_, err = db.Execute(`INSERT INTO invoice_items
 			(id, invoice_id, product_sku, product_name, quantity, unit_price, vat_rate,

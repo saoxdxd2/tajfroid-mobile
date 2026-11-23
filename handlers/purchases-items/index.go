@@ -27,6 +27,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var body struct {
+			ID          string `json:"id"` // optional client idempotency key
 			PurchaseID  string `json:"purchaseId"`
 			ProductSKU  string `json:"productSku"`
 			ProductName string `json:"productName"`
@@ -34,6 +35,13 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			UnitCost    string `json:"unitCost"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
+		if body.ID != "" {
+			if ex, err := db.Execute("SELECT id FROM purchase_items WHERE id=?", lib.Text(body.ID)); err == nil && len(ex.Rows) > 0 {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{"id": body.ID, "idempotent": true})
+				return
+			}
+		}
 		if body.PurchaseID == "" || body.ProductSKU == "" {
 			http.Error(w, "purchaseId and productSku required", http.StatusBadRequest)
 			return
@@ -68,7 +76,10 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "unit cost cannot be negative", http.StatusBadRequest)
 			return
 		}
-		id := lib.NewID()
+		id := body.ID
+		if id == "" {
+			id = lib.NewID()
+		}
 		now := time.Now().Unix()
 		_, err = db.Execute(`INSERT INTO purchase_items
 			(id, purchase_id, product_sku, product_name, quantity, unit_cost, created_at, updated_at)

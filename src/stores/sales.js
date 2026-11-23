@@ -86,13 +86,23 @@ export const useSalesStore = defineStore('sales', () => {
   }
 
   async function addItem(invoiceId, item) {
-    const res = await apiFetch('/api/invoices/items', {
-      method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ invoiceId, ...item }),
-    })
-    if (!res.ok) throw new Error(await readError(res, 'Failed to add item'))
-    await fetchInvoice(invoiceId)
-    await fetchInvoices()
-    return res.json()
+    const body = { invoiceId, ...item }
+    if (!body.id) body.id = crypto.randomUUID()
+    try {
+      const res = await apiFetch('/api/invoices/items', {
+        method: 'POST', headers: jsonHeaders(), body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error(await readError(res, 'Failed to add item'))
+      await fetchInvoice(invoiceId)
+      await fetchInvoices()
+      return res.json()
+    } catch (e) {
+      if (!navigator.onLine || e instanceof TypeError) {
+        await useMutationStore().enqueue({ method: 'POST', path: '/api/invoices/items', body, entity: 'invoice_item', entityId: body.id })
+        return { id: body.id, queued: true }
+      }
+      throw e
+    }
   }
 
   async function removeItem(invoiceId, itemId) {

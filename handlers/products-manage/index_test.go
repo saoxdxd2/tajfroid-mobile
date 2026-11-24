@@ -165,6 +165,142 @@ func TestPutConflictStillReturns409(t *testing.T) {
 	}
 }
 
+func TestPutPinnedPricePreserveClearAndSet(t *testing.T) {
+	var rec recordedCalls
+	srv := mockManageTurso(t, 7, &rec, "")
+	defer srv.Close()
+
+	cases := []struct {
+		name       string
+		body       string
+		wantPin    interface{}
+		wantClear  bool
+		wantActive bool
+	}{
+		{
+			name: "omitted preserves the pin",
+			body: `{"baseCatalogVersion":7,"name":"New"}`,
+		},
+		{
+			name: "null preserves the pin",
+			body: `{"baseCatalogVersion":7,"pinnedPrice":null}`,
+		},
+		{
+			name:      "empty string clears the pin",
+			body:      `{"baseCatalogVersion":7,"pinnedPrice":""}`,
+			wantClear: true,
+		},
+		{
+			name:       "decimal sets the pin and activates",
+			body:       `{"baseCatalogVersion":7,"pinnedPrice":"149.00","active":false}`,
+			wantPin:    "149.00",
+			wantActive: true,
+		},
+		{
+			name:       "camel and snake aliases agree",
+			body:       `{"baseCatalogVersion":7,"pinned_price":"12,50"}`,
+			wantPin:    "12.50",
+			wantActive: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			before := rec.len()
+			req := httptest.NewRequest(http.MethodPut, "/api/products-manage?sku=S1", strings.NewReader(tc.body))
+			res := httptest.NewRecorder()
+			Handler(res, req)
+			if res.Code != http.StatusOK {
+				t.Fatalf("got %d, want 200: %s", res.Code, res.Body.String())
+			}
+			calls := rec.snapshot()
+			if len(calls) != before+2 {
+				t.Fatalf("calls=%d, want version preflight + 1 batch", len(calls)-before)
+			}
+			batch := calls[len(calls)-1]
+			var pinStmts, activeStmts int
+			for _, stmt := range batch {
+				switch {
+				case strings.Contains(stmt.SQL, "SET pinned_price=?"):
+					pinStmts++
+					if len(stmt.Args) != 2 || lib.ToString(stmt.Args[0].Value) != lib.ToString(tc.wantPin) {
+						t.Fatalf("wrong pinned_price args: %#v", stmt.Args)
+					}
+					if tc.wantPin == "" && stmt.Args[0].Type != "text" {
+						t.Fatalf("clear must store SQL text '', got type %q", stmt.Args[0].Type)
+					}
+				case strings.Contains(stmt.SQL, "SET active=?"):
+					activeStmts++
+				}
+			}
+			if tc.wantPin == nil && tc.wantClear == false && pinStmts != 0 {
+				t.Fatalf("preserved pin was written: %#v", batch)
+			}
+			if (tc.wantPin != nil || tc.wantClear) && pinStmts != 1 {
+				t.Fatalf("want exactly one pinned_price write: %#v", batch)
+			}
+			if tc.wantActive && activeStmts != 1 {
+				t.Fatalf("pin set must write active=1 exactly once: %#v", batch)
+			}
+			if !tc.wantActive && strings.Contains(tc.body, `"active"`) == false && activeStmts != 0 {
+				t.Fatalf("pin clear must not change active: %#v", batch)
+			}
+			bumps := 0
+			for _, stmt := range batch {
+				if strings.Contains(stmt.SQL, "catalog_meta") {
+					bumps++
+				}
+			}
+			if bumps != 1 {
+				t.Fatalf("want exactly one catalog_meta bump: %#v", batch)
+			}
+		})
+	}
+}
+
+func TestPutPinnedPriceRejectsInvalidDecimalsWithoutWriting(t *testing.T) {
+	var rec recordedCalls
+	srv := mockManageTurso(t, 7, &rec, "")
+	defer srv.Close()
+
+	for _, raw := range []string{`"NaN"`, `"Infinity"`, `"-1"`, `"abc"`, `" "`, `"1e309"`} {
+		t.Run(raw, func(t *testing.T) {
+			before := rec.len()
+			body := `{"baseCatalogVersion":7,"pinnedPrice":` + raw + `}`
+			req := httptest.NewRequest(http.MethodPut, "/api/products-manage?sku=S1", strings.NewReader(body))
+			res := httptest.NewRecorder()
+			Handler(res, req)
+			if res.Code != http.StatusBadRequest {
+				t.Fatalf("pinnedPrice=%s got %d, want 400: %s", raw, res.Code, res.Body.String())
+			}
+			if got := rec.len(); got != before+1 {
+				t.Fatalf("invalid pin reached the write batch: calls %d -> %d", before, got)
+			}
+		})
+	}
+}
+
+func TestPutPinnedPriceConflictDoesZeroWrites(t *testing.T) {
+	var rec recordedCalls
+	srv := mockManageTurso(t, 99, &rec, "")
+	defer srv.Close()
+
+	before := rec.len()
+	body := `{"baseCatalogVersion":7,"pinnedPrice":"149.00"}`
+	req := httptest.NewRequest(http.MethodPut, "/api/products-manage?sku=S1", strings.NewReader(body))
+	res := httptest.NewRecorder()
+	Handler(res, req)
+	if res.Code != http.StatusConflict {
+		t.Fatalf("got %d, want 409: %s", res.Code, res.Body.String())
+	}
+	calls := rec.snapshot()
+	if len(calls) != before+1 || len(calls[before]) != 1 {
+		t.Fatalf("conflict must do only the version preflight: %#v", calls[before:])
+	}
+	if !strings.Contains(calls[before][0].SQL, "SELECT version FROM catalog_meta") {
+		t.Fatalf("unexpected preflight SQL: %q", calls[before][0].SQL)
+	}
+}
+
 func TestDeleteBatchesArchiveAndVersionBump(t *testing.T) {
 	var posts int64
 	var mu sync.Mutex
@@ -267,7 +403,7 @@ func mockManageTurso(t *testing.T, version int64, rec *recordedCalls, batchErr s
 		}
 		if len(stmts) == 1 && strings.Contains(stmts[0].SQL, "FROM catalog WHERE sku = ?") {
 			w.Write(tursoRowsPayload([]interface{}{
-				[]interface{}{"S1", "Name", nil, "10", "12", "20", 5, 1, "Cat", "Brand"},
+				[]interface{}{"S1", "Name", nil, "10", "12", "149.00", "20", 5, 1, "Cat", "Brand"},
 			}))
 			return
 		}
@@ -300,10 +436,13 @@ func TestProductManageSKUIsValidatedAndParameterized(t *testing.T) {
 		if err := json.Unmarshal(res.Body.Bytes(), &out); err != nil {
 			t.Fatal(err)
 		}
-		for _, key := range []string{"sku", "name", "description", "purchasePrice", "salePrice", "vatRate", "stock", "active", "category", "brand", "catalogVersion"} {
+		for _, key := range []string{"sku", "name", "description", "purchasePrice", "salePrice", "pinnedPrice", "effectivePrice", "priced", "vatRate", "stock", "active", "category", "brand", "catalogVersion"} {
 			if _, ok := out[key]; !ok {
 				t.Fatalf("GET response missing %q: %s", key, res.Body.String())
 			}
+		}
+		if out["pinnedPrice"] != "149.00" || out["effectivePrice"] != "149.00" || out["priced"] != true {
+			t.Fatalf("managed GET did not resolve the pin: %s", res.Body.String())
 		}
 		calls := rec.snapshot()
 		if len(calls) != before+2 {
@@ -645,8 +784,10 @@ func TestProductCreateUNIQUEStillReturns409(t *testing.T) {
 	}
 }
 
-func TestProductListResponseShape(t *testing.T) {
+func mockProductListTurso(t *testing.T, posts *int64) *httptest.Server {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(posts, 1)
 		var body lib.TursoPipelineBody
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("decode pipeline: %v", err)
@@ -657,12 +798,23 @@ func TestProductListResponseShape(t *testing.T) {
 			w.Write(tursoVersionPayload(9))
 			return
 		}
+		if !strings.Contains(body.Requests[0].Stmt.SQL, "pinned_price") {
+			t.Errorf("product list must select pinned_price: %q", body.Requests[0].Stmt.SQL)
+		}
 		w.Write(tursoRowsPayload([]interface{}{
-			[]interface{}{"S1", "Alpha", "desc", "10", "12", "20", 4, 1, "Cat", "Brand"},
+			[]interface{}{"S1", "Alpha", "desc", "10", "12", "", "20", 4, 1, "Cat", "Brand"},
+			[]interface{}{"S2", "Beta", nil, "0", "0", nil, "20", 2, 1, nil, nil},
+			[]interface{}{"S3", "Gamma", nil, "0", "0", "149.00", "20", 1, 0, nil, nil},
 		}))
 	}))
-	defer srv.Close()
 	setupMockTurso(t, srv)
+	return srv
+}
+
+func TestProductListResponseShapeAndDefaultFilter(t *testing.T) {
+	var posts int64
+	srv := mockProductListTurso(t, &posts)
+	defer srv.Close()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/products", nil)
 	res := httptest.NewRecorder()
@@ -678,11 +830,50 @@ func TestProductListResponseShape(t *testing.T) {
 		t.Fatalf("top-level shape changed: %s", res.Body.String())
 	}
 	items, ok := out["products"].([]interface{})
-	if !ok || len(items) != 1 {
-		t.Fatalf("products shape changed: %s", res.Body.String())
+	if !ok || len(items) != 2 {
+		t.Fatalf("default list must hide only unpriced products: %s", res.Body.String())
 	}
 	item, ok := items[0].(map[string]interface{})
-	if !ok || len(item) != 10 || item["sku"] != "S1" || item["stock"] != float64(4) || item["active"] != true {
+	if !ok || len(item) != 13 || item["sku"] != "S1" || item["stock"] != float64(4) || item["active"] != true {
 		t.Fatalf("product shape changed: %#v", items[0])
+	}
+	if item["pinnedPrice"] != "" || item["effectivePrice"] != "12" || item["priced"] != true {
+		t.Fatalf("effective price not resolved: %#v", item)
+	}
+	pinnedItem, ok := items[1].(map[string]interface{})
+	if !ok || pinnedItem["sku"] != "S3" || pinnedItem["effectivePrice"] != "149.00" || pinnedItem["priced"] != true {
+		t.Fatalf("pinned product with sale_price=0 must remain visible: %#v", items[1])
+	}
+}
+
+func TestProductListIncludeUnpricedFlag(t *testing.T) {
+	var posts int64
+	srv := mockProductListTurso(t, &posts)
+	defer srv.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/products?include_unpriced=1", nil)
+	res := httptest.NewRecorder()
+	productshandler.Handler(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200: %s", res.Code, res.Body.String())
+	}
+	var out map[string]interface{}
+	if err := json.Unmarshal(res.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	items, ok := out["products"].([]interface{})
+	if !ok || len(items) != 3 {
+		t.Fatalf("include_unpriced must expose all 3 rows: %s", res.Body.String())
+	}
+	bySKU := make(map[string]map[string]interface{}, len(items))
+	for _, raw := range items {
+		item := raw.(map[string]interface{})
+		bySKU[lib.ToString(item["sku"])] = item
+	}
+	if legacy := bySKU["S2"]; legacy["pinnedPrice"] != nil || legacy["effectivePrice"] != "0" || legacy["priced"] != false {
+		t.Fatalf("legacy NULL pin must fall back to sale price: %#v", legacy)
+	}
+	if pinned := bySKU["S3"]; pinned["pinnedPrice"] != "149.00" || pinned["effectivePrice"] != "149.00" || pinned["priced"] != true {
+		t.Fatalf("pin must win in pricing surfaces: %#v", pinned)
 	}
 }

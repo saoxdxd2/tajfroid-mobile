@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -31,13 +32,18 @@ const (
 	catalogMaxStock      = int64(1000000000)
 )
 
-const catalogInsertSQL = "INSERT INTO catalog (sku, name, sale_price, vat_rate, stock, active, category, brand) VALUES (?,?,?,?,?,?,?,?) " +
-	"ON CONFLICT(sku) DO UPDATE SET name=excluded.name, sale_price=excluded.sale_price, vat_rate=excluded.vat_rate, " +
+const catalogInsertSQL = "INSERT INTO catalog (sku, name, pinned_price, sale_price, vat_rate, stock, active, category, brand) VALUES (?,?,?,?,?,?,?,?,?) " +
+	"ON CONFLICT(sku) DO UPDATE SET name=excluded.name, " +
+	// A legacy client that omits (or nulls) pinned_price must not wipe a pin
+	// entered on the phone. An explicit '' clears it; a decimal sets it.
+	"pinned_price = CASE WHEN excluded.pinned_price IS NULL THEN catalog.pinned_price ELSE excluded.pinned_price END, " +
+	"sale_price=excluded.sale_price, vat_rate=excluded.vat_rate, " +
 	"stock=excluded.stock, active=excluded.active, category=excluded.category, brand=excluded.brand"
 
 type catalogRow struct {
 	sku       string
 	name      string
+	pinned    lib.TursoArg
 	salePrice string
 	vatRate   string
 	stock     int64
@@ -110,13 +116,48 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		newVersion = newRevision
 	}
 
-	stmts := make([]lib.TursoStmt, 0, len(rows)+2)
-	stmts = append(stmts, lib.TursoStmt{SQL: "DELETE FROM catalog"})
+	// A rebuild is not allowed to wipe pins entered on the phone while a
+	// desktop was offline. Read the current SKUs only after the baseRevision
+	// check, then delete just the rows missing from this snapshot.
+	existing, err := db.Execute("SELECT sku FROM catalog")
+	if err != nil {
+		http.Error(w, "catalog state unavailable", http.StatusInternalServerError)
+		return
+	}
+	incoming := make(map[string]struct{}, len(rows))
+	for _, p := range rows {
+		incoming[p.sku] = struct{}{}
+	}
+	stale := make([]string, 0)
+	seenStale := make(map[string]struct{})
+	for _, row := range existing.Rows {
+		sku := lib.ToString(row[0])
+		if sku == "" {
+			continue
+		}
+		if _, ok := incoming[sku]; ok {
+			continue
+		}
+		if _, ok := seenStale[sku]; ok {
+			continue
+		}
+		seenStale[sku] = struct{}{}
+		stale = append(stale, sku)
+	}
+	sort.Strings(stale)
+
+	stmts := make([]lib.TursoStmt, 0, len(stale)+len(rows)+1)
+	for _, sku := range stale {
+		stmts = append(stmts, lib.TursoStmt{
+			SQL:  "DELETE FROM catalog WHERE sku=?",
+			Args: []lib.TursoArg{lib.Text(sku)},
+		})
+	}
 	for _, p := range rows {
 		stmts = append(stmts, lib.TursoStmt{
 			SQL: catalogInsertSQL,
 			Args: []lib.TursoArg{
-				lib.Text(p.sku), lib.Text(p.name), lib.Text(p.salePrice), lib.Text(p.vatRate),
+				lib.Text(p.sku), lib.Text(p.name), p.pinned, lib.Text(p.salePrice), lib.Text(p.vatRate),
 				lib.Int(p.stock), lib.Int(p.active), p.category, p.brand,
 			},
 		})
@@ -167,6 +208,10 @@ func prepareCatalogProducts(raw []map[string]interface{}) ([]catalogRow, error) 
 		if name == "" {
 			return nil, fmt.Errorf("product %d: name required", i)
 		}
+		pinned, err := parseCatalogPin(p, i)
+		if err != nil {
+			return nil, err
+		}
 		salePrice, err := parseCatalogDecimal(p["sale_price"], "0")
 		if err != nil {
 			return nil, fmt.Errorf("product %d sale_price: %w", i, err)
@@ -195,6 +240,7 @@ func prepareCatalogProducts(raw []map[string]interface{}) ([]catalogRow, error) 
 		row := catalogRow{
 			sku:       sku,
 			name:      name,
+			pinned:    pinned,
 			salePrice: salePrice,
 			vatRate:   vatRate,
 			stock:     stock,
@@ -248,6 +294,40 @@ func canonicalDecimalText(s string) string {
 		return strings.Join(parts[:len(parts)-1], "") + "." + last
 	}
 	return strings.ReplaceAll(s, ",", "")
+}
+
+// parseCatalogPin keeps the three pin states distinct. A missing key and a
+// JSON null both become SQL NULL, which the upsert treats as "preserve"; an
+// empty string becomes SQL empty text (explicit clear); a decimal sets the pin.
+func parseCatalogPin(product map[string]interface{}, i int) (lib.TursoArg, error) {
+	raw, ok := product["pinned_price"]
+	if !ok || raw == nil {
+		raw = product["pinnedPrice"]
+	}
+	if raw == nil {
+		return lib.Null(), nil
+	}
+	s := lib.ToString(raw)
+	if s == "" {
+		return lib.Text(""), nil
+	}
+	if canonicalDecimalText(s) == "" {
+		return lib.Null(), fmt.Errorf("product %d pinned_price: must be a decimal string or an empty string", i)
+	}
+	value, err := parseCatalogDecimal(raw, "")
+	if err != nil {
+		return lib.Null(), fmt.Errorf("product %d pinned_price: %w", i, err)
+	}
+	if value == "" {
+		return lib.Null(), fmt.Errorf("product %d pinned_price: must be a decimal string or an empty string", i)
+	}
+	// Keep the submitted scale ("149.00" stays "149.00"). Only exponent
+	// notation needs expanding to plain decimal after validation.
+	text := canonicalDecimalText(s)
+	if strings.ContainsAny(text, "eE") {
+		text = value
+	}
+	return lib.Text(text), nil
 }
 
 func parseCatalogDecimal(v interface{}, fallback string) (string, error) {

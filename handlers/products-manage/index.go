@@ -33,7 +33,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		res, err := db.Execute("SELECT sku, name, description, purchase_price, sale_price, vat_rate, stock, active, category, brand FROM catalog WHERE sku = ?", lib.Text(sku))
+		res, err := db.Execute("SELECT sku, name, description, purchase_price, sale_price, pinned_price, vat_rate, stock, active, category, brand FROM catalog WHERE sku = ?", lib.Text(sku))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -48,12 +48,15 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		row := res.Rows[0]
+		effectivePrice, priced := lib.CatalogEffectivePrice(row[5], row[4])
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"sku": row[0], "name": row[1], "description": lib.NullStr(row[2]),
-			"purchasePrice": row[3], "salePrice": row[4], "vatRate": row[5],
-			"stock": lib.ToInt(row[6]), "active": lib.ToInt(row[7]) == 1,
-			"category": lib.NullStr(row[8]), "brand": lib.NullStr(row[9]),
+			"purchasePrice": row[3], "salePrice": row[4],
+			"pinnedPrice": lib.NullIface(row[5]), "effectivePrice": effectivePrice, "priced": priced,
+			"vatRate": row[6],
+			"stock":   lib.ToInt(row[7]), "active": lib.ToInt(row[8]) == 1,
+			"category": lib.NullStr(row[9]), "brand": lib.NullStr(row[10]),
 			"catalogVersion": ver,
 		})
 
@@ -159,6 +162,10 @@ type managedProductBody struct {
 	Category           string      `json:"category"`
 	Brand              string      `json:"brand"`
 	BaseCatalogVersion int64       `json:"baseCatalogVersion"`
+	// PinnedPrice is the phone contract key. The snake_case alias is accepted
+	// as well; omitted and null both mean "preserve the existing pin".
+	PinnedPrice      interface{} `json:"pinnedPrice"`
+	PinnedPriceSnake interface{} `json:"pinned_price"`
 }
 
 type managedUpdate struct {
@@ -166,10 +173,54 @@ type managedUpdate struct {
 	value lib.TursoArg
 }
 
+// managedPin models the three write states for a pin: absent (leave the
+// column untouched), cleared (store empty text), or set to a validated decimal.
+type managedPin struct {
+	present bool
+	clear   bool
+	value   lib.TursoArg
+}
+
+func parseManagedPin(body managedProductBody) (managedPin, error) {
+	raw := body.PinnedPrice
+	if raw == nil {
+		raw = body.PinnedPriceSnake
+	}
+	if raw == nil {
+		return managedPin{}, nil
+	}
+	s := lib.ToString(raw)
+	if s == "" {
+		return managedPin{present: true, clear: true}, nil
+	}
+	if canonicalDecimalText(s) == "" {
+		return managedPin{}, errors.New("pinnedPrice must be a decimal string or an empty string")
+	}
+	value, err := parseManagedDecimal(raw)
+	if err != nil {
+		return managedPin{}, fmt.Errorf("pinnedPrice %w", err)
+	}
+	if value == "" {
+		return managedPin{}, errors.New("pinnedPrice must be a decimal string or an empty string")
+	}
+	// Keep the submitted scale ("149.00" stays "149.00"). Only exponent
+	// notation needs expanding to plain decimal after validation.
+	text := canonicalDecimalText(s)
+	if strings.ContainsAny(text, "eE") {
+		text = value
+	}
+	return managedPin{present: true, value: lib.Text(text)}, nil
+}
+
 // managedUpdates validates every field before any statement is sent, so a
 // malformed number or negative stock never leaves a half-applied batch.
 func managedUpdates(body managedProductBody) ([]managedUpdate, error) {
-	updates := make([]managedUpdate, 0, 9)
+	pin, err := parseManagedPin(body)
+	if err != nil {
+		return nil, err
+	}
+	pinIsSet := pin.present && !pin.clear
+	updates := make([]managedUpdate, 0, 11)
 	addText := func(field, sqlText, value string, maxRunes int) error {
 		clean, err := cleanManagedText(value, maxRunes)
 		if err != nil {
@@ -220,13 +271,27 @@ func managedUpdates(body managedProductBody) ([]managedUpdate, error) {
 		if err != nil {
 			return nil, fmt.Errorf("active %w", err)
 		}
-		updates = append(updates, managedUpdate{sql: "UPDATE catalog SET active=? WHERE sku=?", value: lib.Int(active)})
+		// A pin set always activates the product, even if the client also
+		// sent an explicit active flag in the same edit.
+		if !pinIsSet {
+			updates = append(updates, managedUpdate{sql: "UPDATE catalog SET active=? WHERE sku=?", value: lib.Int(active)})
+		}
 	}
 	if err := addText("category", "UPDATE catalog SET category=? WHERE sku=?", body.Category, manageMaxTermRunes); err != nil {
 		return nil, err
 	}
 	if err := addText("brand", "UPDATE catalog SET brand=? WHERE sku=?", body.Brand, manageMaxTermRunes); err != nil {
 		return nil, err
+	}
+	if pin.present {
+		if pin.clear {
+			// An explicit empty string is a real value, not SQL NULL: it
+			// distinguishes "cleared" from a legacy pin that was never set.
+			updates = append(updates, managedUpdate{sql: "UPDATE catalog SET pinned_price=? WHERE sku=?", value: lib.Text("")})
+		} else {
+			updates = append(updates, managedUpdate{sql: "UPDATE catalog SET pinned_price=? WHERE sku=?", value: pin.value})
+			updates = append(updates, managedUpdate{sql: "UPDATE catalog SET active=? WHERE sku=?", value: lib.Int(1)})
+		}
 	}
 	return updates, nil
 }

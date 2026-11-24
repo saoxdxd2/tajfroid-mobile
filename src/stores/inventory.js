@@ -2,6 +2,22 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiFetch, readConflictResponse, jsonHeaders, readError } from '../lib/api'
 import { useMutationStore } from './mutations'
+import { normalizeProduct } from './catalog'
+
+// Pin writes: omitted/null preserves, "" clears, a positive decimal sets.
+function pinValue(value) {
+  if (value === undefined || value === null) return null
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value < 0) throw new Error('Invalid pinned price')
+    return value === 0 ? '' : value.toFixed(2)
+  }
+  const text = String(value).trim()
+  if (!text) return ''
+  if (!/^\d+(\.\d{1,2})?$/.test(text)) throw new Error('Invalid pinned price')
+  const n = Number(text)
+  if (!Number.isFinite(n) || n < 0) throw new Error('Invalid pinned price')
+  return n === 0 ? '' : n.toFixed(2)
+}
 
 export const useInventoryStore = defineStore('inventory', () => {
   const products = ref([])
@@ -11,20 +27,52 @@ export const useInventoryStore = defineStore('inventory', () => {
   const loading = ref(false)
   const error = ref('')
 
+  // Pricing surfaces need every product, including imported stock with no
+  // price. Sales surfaces filter on `priced` locally.
   async function fetchProducts() {
     loading.value = true
     error.value = ''
     try {
-      const res = await apiFetch('/api/products')
+      const res = await apiFetch('/api/products?include_unpriced=1')
       if (!res.ok) throw new Error(await readError(res, 'Failed to fetch products'))
       const data = await res.json()
-      products.value = data.products || []
+      products.value = (data.products || []).map(normalizeProduct)
       if (data.catalogVersion !== undefined) catalogVersion.value = data.catalogVersion
     } catch (e) {
       error.value = e.message
     } finally {
       loading.value = false
     }
+  }
+
+  function findProduct(sku) {
+    return products.value.find(p => p && p.sku === sku)
+  }
+
+  function pinState(sku) {
+    const p = findProduct(sku)
+    if (!p) return null
+    return {
+      pinnedPrice: p.pinnedPrice, pinned_price: p.pinned_price,
+      effectivePrice: p.effectivePrice, effective_price: p.effective_price,
+      priced: p.priced, active: p.active,
+    }
+  }
+
+  function applyPinState(sku, state) {
+    const p = findProduct(sku)
+    if (p && state) Object.assign(p, state)
+  }
+
+  function applyPin(sku, pinnedPrice) {
+    const product = findProduct(sku)
+    if (!product) return
+    product.pinnedPrice = pinnedPrice
+    product.pinned_price = pinnedPrice
+    product.effectivePrice = pinnedPrice || product.salePrice || ''
+    product.effective_price = product.effectivePrice
+    product.priced = Number(product.effectivePrice) > 0
+    if (pinnedPrice) product.active = true
   }
 
   async function fetchCategories() {
@@ -93,6 +141,74 @@ export const useInventoryStore = defineStore('inventory', () => {
         await useMutationStore().enqueue({ method: 'PUT', path: `/api/products/manage?sku=${encodeURIComponent(sku)}`, body, entity: 'product', entityId: sku, baseUpdatedAt: body.baseCatalogVersion })
         return
       }
+      throw e
+    }
+    await fetchProducts()
+  }
+
+  // A pin is a phone-side catalog mutation: one UUID per edit (also used as the
+  // queue idempotency key), baseCatalogVersion for optimistic concurrency, and
+  // entity 'product' so the existing conflict UI read path can resolve it.
+  async function setPinnedPrice({ sku, pinnedPrice }) {
+    const value = pinValue(pinnedPrice)
+    if (value === null) return // preserve: caller omitted the price
+    const id = crypto.randomUUID()
+    const path = `/api/products/manage?sku=${encodeURIComponent(sku)}`
+    const body = () => ({ id, pinnedPrice: value, baseCatalogVersion: catalogVersion.value })
+    const mutations = useMutationStore()
+    const previous = pinState(sku)
+    applyPin(sku, value) // optimistic: visible immediately, also while offline
+
+    async function resolveConflict(res) {
+      // A 409 means the catalog moved; never replay on the stale token.
+      await fetchProducts()
+      applyPin(sku, value)
+      const freshBody = body()
+      try {
+        await mutations.conflictFromResponse(res, {
+          method: 'PUT', path, body: freshBody, entity: 'product', entityId: sku,
+          baseUpdatedAt: freshBody.baseCatalogVersion, fallback: 'Conflict', idempotencyKey: id,
+        })
+      } catch (e) {
+        if (!e.conflict) throw e
+      }
+      let conflictId = mutations.items.find(x => x && x.idempotencyKey === id)?.id
+      if (!conflictId) {
+        await mutations.load()
+        conflictId = mutations.items.find(x => x && x.idempotencyKey === id)?.id
+      }
+      if (!conflictId) {
+        conflictId = await mutations.enqueue({
+          method: 'PUT', path, body: freshBody, entity: 'product', entityId: sku,
+          baseUpdatedAt: freshBody.baseCatalogVersion, idempotencyKey: id,
+        })
+      }
+      await mutations.updateBody(conflictId, freshBody)
+      await mutations.retry(conflictId)
+      await mutations.flush()
+    }
+
+    try {
+      const res = await apiFetch(path, {
+        method: 'PUT',
+        headers: jsonHeaders(),
+        body: JSON.stringify(body()),
+      })
+      if (res.status === 409) {
+        await resolveConflict(res)
+        return
+      }
+      if (!res.ok) throw new Error(await readError(res, 'Failed to set pinned price'))
+    } catch (e) {
+      if (e.conflict) throw e
+      if (!navigator.onLine || e instanceof TypeError) {
+        await mutations.enqueue({
+          method: 'PUT', path, body: body(), entity: 'product', entityId: sku,
+          baseUpdatedAt: catalogVersion.value, idempotencyKey: id,
+        })
+        return // keep the optimistic state: the edit is queued for replay
+      }
+      applyPinState(sku, previous) // rejected write: do not show an unsaved pin
       throw e
     }
     await fetchProducts()
@@ -213,7 +329,7 @@ export const useInventoryStore = defineStore('inventory', () => {
   return {
     products, categories, brands, catalogVersion, loading, error,
     fetchProducts, fetchCategories, fetchBrands,
-    createProduct, updateProduct, deleteProduct,
+    createProduct, updateProduct, deleteProduct, setPinnedPrice,
     createCategory, deleteCategory,
     createBrand, deleteBrand,
     adjustStock,

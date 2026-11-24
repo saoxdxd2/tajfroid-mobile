@@ -48,7 +48,7 @@
         <select v-model="itemForm.productSku" @change="fillFromProduct">
           <option value="">-- Select a product --</option>
           <option v-for="p in activeProducts" :key="p.sku" :value="p.sku">
-            {{ p.sku }} — {{ p.name }} (stock {{ p.stock }})
+            {{ p.sku }} — {{ p.name }} ({{ p.effectivePrice }} DH, stock {{ p.stock }})
           </option>
         </select>
         <label>Quantity</label>
@@ -141,7 +141,8 @@ const itemForm = ref({
 })
 const payForm = ref({ method: 'Cash', amount: '', checkId: '', reference: '', notes: '' })
 
-const activeProducts = computed(() => inventory.products.filter(p => p.active))
+// Unpriced imported stock must never enter an invoice, even if it is active.
+const activeProducts = computed(() => inventory.products.filter(p => p.active && p.priced))
 const incomingChecks = computed(() =>
   finance.checks.filter(c =>
     c.direction === 'Incoming' &&
@@ -177,14 +178,18 @@ function stateClass(state) {
 }
 
 function fillFromProduct() {
-  const p = inventory.products.find(x => x.sku === itemForm.value.productSku)
+  const p = activeProducts.value.find(x => x.sku === itemForm.value.productSku)
   if (!p) return
-  itemForm.value.unitPrice = p.salePrice
+  itemForm.value.unitPrice = p.effectivePrice || p.salePrice
   itemForm.value.vatRate = p.vatRate
 }
 
 async function addItem() {
   itemMsg.value = ''
+  if (itemForm.value.productSku && !activeProducts.value.some(p => p.sku === itemForm.value.productSku)) {
+    itemMsg.value = 'This product needs pricing before it can be sold.'
+    return
+  }
   try {
     await store.addItem(route.params.id, { ...itemForm.value })
     itemForm.value = {

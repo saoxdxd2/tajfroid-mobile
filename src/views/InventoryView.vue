@@ -3,6 +3,7 @@
     <h1>Inventory</h1>
     <div class="toolbar">
       <input v-model="q" placeholder="Search SKU / name" />
+      <router-link to="/needs-pricing" class="pricing-link">Needs pricing ({{ unpricedCount }})</router-link>
       <button @click="showAdd = !showAdd">{{ showAdd ? 'Cancel' : '+ Add product' }}</button>
       <button @click="load">Refresh</button>
     </div>
@@ -37,10 +38,13 @@
         <div class="product-header">
           <strong>{{ p.sku }}</strong> — {{ p.name }}
           <span class="badge" :class="p.active ? 'active' : 'draft'">{{ p.active ? 'Active' : 'Draft' }}</span>
+          <span v-if="!p.priced" class="badge needs-pricing">Needs pricing</span>
+          <span v-if="p.pinnedPrice" class="badge pinned">Pinned</span>
         </div>
         <div class="product-details">
           <span>Stock: {{ p.stock }}</span>
-          <span>Price: {{ p.salePrice }} DH</span>
+          <span>Price: {{ p.effectivePrice }} DH</span>
+          <span v-if="p.pinnedPrice">Base: {{ p.salePrice }} DH</span>
           <span v-if="p.category">Cat: {{ p.category }}</span>
           <span v-if="p.brand">Brand: {{ p.brand }}</span>
         </div>
@@ -48,6 +52,9 @@
           <button @click="quickAdjust(p, 1)">+1</button>
           <button @click="quickAdjust(p, -1)">-1</button>
           <button @click="startEdit(p)">Edit</button>
+          <input v-model="pinDraft[p.sku]" type="number" step="0.01" min="0" placeholder="Pinned price" aria-label="Pinned price" />
+          <button @click="setPin(p)">Set price</button>
+          <button v-if="p.pinnedPrice" @click="clearPin(p)">Clear pin</button>
           <button @click="remove(p.sku)" class="danger">Archive</button>
         </div>
       </li>
@@ -57,6 +64,7 @@
     <div v-if="editing" class="modal-overlay" @click.self="editing = null">
       <div class="modal">
         <h3>Edit {{ editing.sku }}</h3>
+        <p v-if="editing.pinnedPrice" class="msg">Pinned at {{ editing.pinnedPrice }} DH — the pin wins over sale price.</p>
         <input v-model="editForm.name" placeholder="Name" />
         <input v-model="editForm.description" placeholder="Description" />
         <input v-model="editForm.purchasePrice" type="number" placeholder="Purchase price" />
@@ -90,6 +98,7 @@ const q = ref('')
 const showAdd = ref(false)
 const msg = ref('')
 const editing = ref(null)
+const pinDraft = ref({})
 
 const form = ref({
   sku: '', name: '', description: '', purchasePrice: '', salePrice: '',
@@ -98,6 +107,7 @@ const form = ref({
 
 const editForm = ref({})
 
+const unpricedCount = computed(() => store.products.filter(p => !p.priced).length)
 const filtered = computed(() => {
   const term = q.value.toLowerCase()
   if (!term) return store.products
@@ -111,6 +121,32 @@ onMounted(async () => {
 
 async function load() {
   await Promise.all([store.fetchProducts(), store.fetchCategories(), store.fetchBrands()])
+}
+
+async function setPin(p) {
+  const raw = pinDraft.value[p.sku]
+  if (raw === undefined || String(raw).trim() === '' || Number(raw) === 0) {
+    await clearPin(p)
+    return
+  }
+  msg.value = ''
+  try {
+    await store.setPinnedPrice({ sku: p.sku, pinnedPrice: raw })
+    pinDraft.value[p.sku] = ''
+    msg.value = `Pinned price saved for ${p.sku}.`
+  } catch (e) {
+    msg.value = 'Error: ' + e.message
+  }
+}
+
+async function clearPin(p) {
+  msg.value = ''
+  try {
+    await store.setPinnedPrice({ sku: p.sku, pinnedPrice: '' })
+    msg.value = `Pin cleared for ${p.sku}.`
+  } catch (e) {
+    msg.value = 'Error: ' + e.message
+  }
 }
 
 async function addProduct() {
@@ -154,7 +190,8 @@ async function saveEdit() {
       salePrice: editForm.value.salePrice,
       vatRate: editForm.value.vatRate,
       stock: editForm.value.stock,
-      active: editForm.value.active,
+      // A pin activates the product; an old Draft form value must not undo it.
+      active: editing.value.pinnedPrice ? true : editForm.value.active,
       category: editForm.value.category,
       brand: editForm.value.brand,
       baseCatalogVersion: store.catalogVersion || undefined,
@@ -198,6 +235,10 @@ async function quickAdjust(p, delta) {
 .badge { padding: 2px 8px; border-radius: 12px; font-size: 0.8em; }
 .badge.active { background: #e8f5e9; color: #2e7d32; }
 .badge.draft { background: #fff3e0; color: #e65100; }
+.badge.needs-pricing { background: #ffebee; color: #c62828; }
+.badge.pinned { background: #e3f2fd; color: #1565c0; }
+.pricing-link { font-size: 0.85em; }
+.product-actions input { width: 130px; padding: 6px; }
 .msg { color: green; }
 .error { color: red; }
 .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 200; }

@@ -28,7 +28,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	db := lib.NewTurso()
 	switch r.Method {
 	case http.MethodGet:
-		res, err := db.Execute("SELECT sku, name, description, purchase_price, sale_price, vat_rate, stock, active, category, brand FROM catalog ORDER BY name ASC")
+		res, err := db.Execute("SELECT sku, name, description, purchase_price, sale_price, pinned_price, vat_rate, stock, active, category, brand FROM catalog ORDER BY name ASC")
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -42,19 +42,29 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		if len(meta.Rows) > 0 {
 			ver = lib.ToInt64(meta.Rows[0][0])
 		}
+		// Sales surfaces use the default filtered list; pricing and inventory
+		// surfaces opt in to unpriced rows with include_unpriced=1.
+		includeUnpriced := r.URL.Query().Get("include_unpriced") == "1"
 		items := []map[string]interface{}{}
 		for _, row := range res.Rows {
+			effectivePrice, priced := lib.CatalogEffectivePrice(row[5], row[4])
+			if !priced && !includeUnpriced {
+				continue
+			}
 			items = append(items, map[string]interface{}{
-				"sku":           row[0],
-				"name":          row[1],
-				"description":   lib.NullStr(row[2]),
-				"purchasePrice": row[3],
-				"salePrice":     row[4],
-				"vatRate":       row[5],
-				"stock":         lib.ToInt(row[6]),
-				"active":        lib.ToInt(row[7]) == 1,
-				"category":      lib.NullStr(row[8]),
-				"brand":         lib.NullStr(row[9]),
+				"sku":            row[0],
+				"name":           row[1],
+				"description":    lib.NullStr(row[2]),
+				"purchasePrice":  row[3],
+				"salePrice":      row[4],
+				"pinnedPrice":    lib.NullIface(row[5]),
+				"effectivePrice": effectivePrice,
+				"priced":         priced,
+				"vatRate":        row[6],
+				"stock":          lib.ToInt(row[7]),
+				"active":         lib.ToInt(row[8]) == 1,
+				"category":       lib.NullStr(row[9]),
+				"brand":          lib.NullStr(row[10]),
 			})
 		}
 		w.Header().Set("Content-Type", "application/json")

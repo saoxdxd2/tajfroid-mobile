@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS catalog (
   description TEXT,
   purchase_price TEXT NOT NULL DEFAULT '0',
   sale_price TEXT NOT NULL,
+  -- NULL = never pinned; '' = explicitly cleared; non-empty decimal = pin.
+  pinned_price TEXT NULL,
   vat_rate TEXT NOT NULL,
   stock INTEGER NOT NULL DEFAULT 0,
   active INTEGER NOT NULL DEFAULT 1,

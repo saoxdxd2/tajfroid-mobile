@@ -26,7 +26,35 @@ Live pre-deploy probe (2026-11-24, read-only):
 `{"error":"no results: {\"error\":\"JWT error: InvalidToken\"}","ok":false}`.
 This is the known token-rotation/deploy blocker; it is not fixed by local code.
 
-## 2. Relay rollout (requires explicit approval)
+## 2. Pre-deploy catalog migration (required once, idempotent)
+
+The relay now reads `catalog.pinned_price`. Fresh databases get the column from
+`schema.sql`; existing databases must add it before the relay is deployed.
+
+Guard query (no secret values, read-only):
+
+```sql
+SELECT name FROM pragma_table_info('catalog') WHERE name = 'pinned_price';
+```
+
+- If the query returns one row, the column exists: do nothing.
+- If it returns no rows, run exactly once:
+
+```sql
+ALTER TABLE catalog ADD COLUMN pinned_price TEXT NULL;
+```
+
+Re-run the guard query afterwards to confirm the row is present. Repeating the
+guard is safe; never run the `ALTER` twice (SQLite has no `ADD COLUMN IF NOT
+EXISTS`). Supply Turso credentials through the deployment environment, not on
+the command line, and never print them. Deploy the relay only after the guard
+passes: catalog reads in the new build select `pinned_price` directly.
+
+Semantics after migration: `NULL` = never pinned, `''` = explicitly cleared,
+non-empty decimal = authoritative pin. `effective_price` falls back to
+`sale_price` for both `NULL` and `''`.
+
+## 3. Relay rollout (requires explicit approval)
 
 ```bash
 git push origin main
@@ -37,7 +65,7 @@ Expected Vercel project: `saos-projects-56035f6d/tajfroid-mobile`.
 If Vercel answers `api-deployments-free-per-day`, stop and retry next day; do
 not bypass or create a second project.
 
-## 3. Post-deploy verification
+## 4. Post-deploy verification
 
 ```bash
 curl -sS https://mobile.tajfroid.com/api/health
@@ -56,7 +84,7 @@ curl -sS "https://mobile.tajfroid.com/api/router?__route=metrics"
 Check `p50_ms`, `p95_ms`, `max_ms`, `count` per route. No token values may
 appear in logs or metrics.
 
-## 4. Phone/relay/desktop sync smoke
+## 5. Phone/relay/desktop sync smoke
 
 1. Pair phone with desktop.
 2. Turn off phone network; create a customer and a check.
@@ -68,7 +96,7 @@ appear in logs or metrics.
 7. Confirm desktop tray shows `last_sync_at` advancing and no plaintext scan
    data in logs.
 
-## 5. APK release (requires manual confirmation)
+## 6. APK release (requires manual confirmation)
 
 See `C:\Users\user\tajfroid-apk\RELEASE.md` and run
 `scripts/build-release.ps1 -VerifyManifestOnly` first. The current canonical

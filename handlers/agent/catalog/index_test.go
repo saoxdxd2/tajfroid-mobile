@@ -33,6 +33,25 @@ func catalogMetaPayload(version, revision int64) []byte {
 	return b
 }
 
+func catalogSKUsPayload(skus []string) []byte {
+	rows := make([]interface{}, 0, len(skus))
+	for _, sku := range skus {
+		rows = append(rows, []interface{}{sku})
+	}
+	b, _ := json.Marshal(map[string]interface{}{"results": []interface{}{
+		map[string]interface{}{
+			"type": "execute",
+			"response": map[string]interface{}{
+				"result": map[string]interface{}{
+					"columns": []interface{}{}, "rows": rows,
+					"affected_row_count": len(skus),
+				},
+			},
+		},
+	}})
+	return b
+}
+
 func catalogPayload(n int) []byte {
 	items := make([]interface{}, 0, n)
 	for i := 0; i < n; i++ {
@@ -50,10 +69,10 @@ func catalogPayload(n int) []byte {
 	return b
 }
 
-func TestCatalogRebuildUsesOneRoundTrip(t *testing.T) {
-	var posts, statements int64
+func TestCatalogRebuildUsesOneWriteBatchAndTargetedDeletes(t *testing.T) {
+	var posts int64
 	var mu sync.Mutex
-	var sqls []string
+	var batches [][]lib.TursoStmt
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt64(&posts, 1)
 		var body lib.TursoPipelineBody
@@ -61,15 +80,23 @@ func TestCatalogRebuildUsesOneRoundTrip(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		atomic.StoreInt64(&statements, int64(len(body.Requests)))
-		mu.Lock()
-		sqls = make([]string, 0, len(body.Requests))
+		stmts := make([]lib.TursoStmt, 0, len(body.Requests))
 		for _, req := range body.Requests {
-			sqls = append(sqls, req.Stmt.SQL)
+			stmts = append(stmts, req.Stmt)
 		}
-		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(catalogPayload(len(body.Requests)))
+		if len(stmts) == 1 && strings.Contains(stmts[0].SQL, "SELECT version, updated_at") {
+			w.Write(catalogMetaPayload(0, 0))
+			return
+		}
+		if len(stmts) == 1 && strings.Contains(stmts[0].SQL, "SELECT sku FROM catalog") {
+			w.Write(catalogSKUsPayload([]string{"OLD-1"}))
+			return
+		}
+		mu.Lock()
+		batches = append(batches, stmts)
+		mu.Unlock()
+		w.Write(catalogPayload(len(stmts)))
 	}))
 	defer srv.Close()
 
@@ -92,19 +119,32 @@ func TestCatalogRebuildUsesOneRoundTrip(t *testing.T) {
 		t.Fatalf("got %d, want 200: %s", rec.Code, rec.Body.String())
 	}
 	gotPosts := atomic.LoadInt64(&posts)
-	gotStatements := atomic.LoadInt64(&statements)
-	t.Logf("catalog rebuild: posts=%d statements=%d products=3", gotPosts, gotStatements)
-	if gotPosts != 2 {
-		t.Fatalf("posts=%d, want 2 (revision read + one write pipeline)", gotPosts)
-	}
-	if gotStatements != 5 {
-		t.Fatalf("statements=%d, want 5 (delete+3 inserts+meta)", gotStatements)
+	t.Logf("catalog rebuild: posts=%d products=3", gotPosts)
+	if gotPosts != 3 {
+		t.Fatalf("posts=%d, want 3 (revision read + SKU read + one write pipeline)", gotPosts)
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(sqls) != 5 || !strings.Contains(sqls[0], "DELETE FROM catalog") ||
-		!strings.Contains(sqls[4], "catalog_meta") {
-		t.Fatalf("statement order wrong: %q", sqls)
+	if len(batches) != 1 {
+		t.Fatalf("captured %d write batches, want 1", len(batches))
+	}
+	sqls := make([]string, 0, len(batches[0]))
+	for _, stmt := range batches[0] {
+		sqls = append(sqls, stmt.SQL)
+	}
+	if len(sqls) != 5 {
+		t.Fatalf("write statements=%d, want 5 (1 targeted delete + 3 upserts + meta): %q", len(sqls), sqls)
+	}
+	if sqls[0] != "DELETE FROM catalog WHERE sku=?" || lib.ToString(batches[0][0].Args[0].Value) != "OLD-1" {
+		t.Fatalf("first statement must delete only the missing SKU: %q", sqls[0])
+	}
+	for _, sql := range sqls {
+		if sql == "DELETE FROM catalog" {
+			t.Fatal("full catalog delete is forbidden")
+		}
+	}
+	if sqls[len(sqls)-1] != lib.CatalogMetaBumpSQL {
+		t.Fatalf("last statement must bump catalog_meta: %q", sqls[len(sqls)-1])
 	}
 	var out map[string]interface{}
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
@@ -121,7 +161,7 @@ func TestCatalogRebuildUsesOneRoundTrip(t *testing.T) {
 	}
 }
 
-func catalogMock(t *testing.T, onBatch func([]lib.TursoStmt)) (*httptest.Server, *int64) {
+func catalogMock(t *testing.T, existingSKUs []string, onBatch func([]lib.TursoStmt)) (*httptest.Server, *int64) {
 	t.Helper()
 	var posts int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -137,6 +177,13 @@ func catalogMock(t *testing.T, onBatch func([]lib.TursoStmt)) (*httptest.Server,
 		if isMetaRead {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write(catalogMetaPayload(0, 0))
+			return
+		}
+		isSKURead := len(body.Requests) == 1 &&
+			strings.Contains(body.Requests[0].Stmt.SQL, "SELECT sku FROM catalog")
+		if isSKURead {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(catalogSKUsPayload(existingSKUs))
 			return
 		}
 		if onBatch != nil {
@@ -224,7 +271,7 @@ func TestCatalogRebuildSanitizesAndDeduplicates1000Products(t *testing.T) {
 
 	var mu sync.Mutex
 	var captured [][]lib.TursoStmt
-	srv, posts := catalogMock(t, func(stmts []lib.TursoStmt) {
+	srv, posts := catalogMock(t, nil, func(stmts []lib.TursoStmt) {
 		mu.Lock()
 		defer mu.Unlock()
 		captured = append(captured, stmts)
@@ -242,8 +289,8 @@ func TestCatalogRebuildSanitizesAndDeduplicates1000Products(t *testing.T) {
 	if out["ok"] != true || out["count"] != float64(total-duplicates) {
 		t.Fatalf("response shape/count wrong: %s", rec.Body.String())
 	}
-	if got := atomic.LoadInt64(posts); got != 2 {
-		t.Fatalf("posts=%d, want 2 (revision read + write pipeline)", got)
+	if got := atomic.LoadInt64(posts); got != 3 {
+		t.Fatalf("posts=%d, want 3 (revision read + SKU read + write pipeline)", got)
 	}
 
 	mu.Lock()
@@ -252,38 +299,41 @@ func TestCatalogRebuildSanitizesAndDeduplicates1000Products(t *testing.T) {
 		t.Fatalf("captured %d batches, want 1", len(captured))
 	}
 	stmts := captured[0]
-	if len(stmts) != total-duplicates+2 {
-		t.Fatalf("statements=%d, want %d", len(stmts), total-duplicates+2)
+	if len(stmts) != total-duplicates+1 {
+		t.Fatalf("statements=%d, want %d (no stale SKUs to delete)", len(stmts), total-duplicates+1)
 	}
-	if !strings.HasPrefix(stmts[0].SQL, "DELETE FROM catalog") {
-		t.Fatalf("first statement should clear the catalog: %q", stmts[0].SQL)
+	if !strings.HasPrefix(stmts[0].SQL, "INSERT INTO catalog ") {
+		t.Fatalf("first statement should be an upsert: %q", stmts[0].SQL)
 	}
 	if !strings.Contains(stmts[len(stmts)-1].SQL, "catalog_meta") {
 		t.Fatalf("last statement should bump the version: %q", stmts[len(stmts)-1].SQL)
 	}
 	seen := make(map[string]bool, total-duplicates)
-	for i, stmt := range stmts[1 : len(stmts)-1] {
+	for i, stmt := range stmts[:len(stmts)-1] {
 		if stmt.SQL != catalogInsertSQL {
-			t.Fatalf("statement %d is not the parameterized insert: %q", i+1, stmt.SQL)
+			t.Fatalf("statement %d is not the parameterized upsert: %q", i+1, stmt.SQL)
 		}
-		if len(stmt.Args) != 8 {
-			t.Fatalf("statement %d has %d args, want 8", i+1, len(stmt.Args))
+		if len(stmt.Args) != 9 {
+			t.Fatalf("statement %d has %d args, want 9", i+1, len(stmt.Args))
 		}
 		sku := lib.ToString(stmt.Args[0].Value)
 		if seen[sku] {
 			t.Fatalf("duplicate SKU in batch: %q", sku)
 		}
 		seen[sku] = true
+		if stmt.Args[2].Type != "null" {
+			t.Fatalf("omitted pinned_price must preserve the existing pin: %#v", stmt.Args[2])
+		}
 		for _, arg := range stmt.Args {
 			if arg.Type == "text" {
 				assertNoControlRunes(t, lib.ToString(arg.Value))
 			}
 		}
-		price := lib.ToString(stmt.Args[2].Value)
+		price := lib.ToString(stmt.Args[3].Value)
 		if price == "NaN" || price == "Infinity" || strings.HasPrefix(price, "-") {
 			t.Fatalf("unsafe price %q reached the batch", price)
 		}
-		stock := lib.ToInt64(stmt.Args[4].Value)
+		stock := lib.ToInt64(stmt.Args[5].Value)
 		if stock < 0 {
 			t.Fatalf("negative stock %d reached the batch", stock)
 		}
@@ -294,7 +344,7 @@ func TestCatalogRebuildSanitizesAndDeduplicates1000Products(t *testing.T) {
 			if stock != 10 { // 1e1 canonicalized
 				t.Fatalf("exponent stock not canonicalized: %d", stock)
 			}
-			if lib.ToInt64(stmt.Args[5].Value) != 1 { // "Y"
+			if lib.ToInt64(stmt.Args[6].Value) != 1 { // "Y"
 				t.Fatal("active=Y was not accepted")
 			}
 		}
@@ -329,6 +379,10 @@ func TestCatalogRebuildRejectsImpossibleDataWithoutWriting(t *testing.T) {
 		{name: "Infinity vat", mutate: func(p map[string]interface{}) { p["vat_rate"] = "Infinity" }},
 		{name: "negative infinity price", mutate: func(p map[string]interface{}) { p["sale_price"] = "-Infinity" }},
 		{name: "negative price", mutate: func(p map[string]interface{}) { p["sale_price"] = "-1" }},
+		{name: "NaN pin", mutate: func(p map[string]interface{}) { p["pinned_price"] = "NaN" }},
+		{name: "negative pin", mutate: func(p map[string]interface{}) { p["pinned_price"] = "-1" }},
+		{name: "whitespace pin", mutate: func(p map[string]interface{}) { p["pinned_price"] = " " }},
+		{name: "invalid camel pin", mutate: func(p map[string]interface{}) { p["pinnedPrice"] = "maybe" }},
 		{name: "fractional stock", mutate: func(p map[string]interface{}) { p["stock"] = 1.5 }},
 		{name: "negative stock", mutate: func(p map[string]interface{}) { p["stock"] = -4 }},
 		{name: "absurd stock", mutate: func(p map[string]interface{}) { p["stock"] = "1e100" }},
@@ -338,7 +392,7 @@ func TestCatalogRebuildRejectsImpossibleDataWithoutWriting(t *testing.T) {
 		{name: "malformed json", rawBody: `{"version":1,"products":[`},
 	}
 
-	srv, posts := catalogMock(t, nil)
+	srv, posts := catalogMock(t, nil, nil)
 	defer srv.Close()
 
 	for _, tc := range cases {
@@ -379,7 +433,7 @@ func TestCatalogRebuildParameterizesHostileValues(t *testing.T) {
 
 	var mu sync.Mutex
 	var captured [][]lib.TursoStmt
-	srv, _ := catalogMock(t, func(stmts []lib.TursoStmt) {
+	srv, _ := catalogMock(t, nil, func(stmts []lib.TursoStmt) {
 		mu.Lock()
 		defer mu.Unlock()
 		captured = append(captured, stmts)
@@ -400,8 +454,8 @@ func TestCatalogRebuildParameterizesHostileValues(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(captured) != 1 || len(captured[0]) != 3 {
-		t.Fatalf("want delete + insert + meta, got %d batches", len(captured))
+	if len(captured) != 1 || len(captured[0]) != 2 {
+		t.Fatalf("want upsert + meta, got %d batches with %v statements", len(captured), captured)
 	}
 	for _, stmt := range captured[0] {
 		for _, hostile := range []string{"DROP TABLE", "script", "OR '1'='1"} {
@@ -410,14 +464,14 @@ func TestCatalogRebuildParameterizesHostileValues(t *testing.T) {
 			}
 		}
 	}
-	insert := captured[0][1]
+	insert := captured[0][0]
 	if got := lib.ToString(insert.Args[0].Value); got != injection {
 		t.Fatalf("sku arg was altered: %q", got)
 	}
 	if got := lib.ToString(insert.Args[1].Value); got != script {
 		t.Fatalf("name arg was not sanitized: %q", got)
 	}
-	if got := lib.ToString(insert.Args[6].Value); got != "' OR '1'='1" {
+	if got := lib.ToString(insert.Args[7].Value); got != "' OR '1'='1" {
 		t.Fatalf("category arg was altered: %q", got)
 	}
 }
@@ -460,6 +514,18 @@ func TestConcurrentCatalogRebuildsAreMonotonicAndDeduplicated(t *testing.T) {
 			w.Write(catalogMetaPayload(version, revision))
 			return
 		}
+		if len(body.Requests) == 1 &&
+			strings.Contains(body.Requests[0].Stmt.SQL, "SELECT sku FROM catalog") {
+			state.mu.Lock()
+			skus := make([]string, 0, len(state.rows))
+			for sku := range state.rows {
+				skus = append(skus, sku)
+			}
+			state.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(catalogSKUsPayload(skus))
+			return
+		}
 		// Lock per statement so concurrent rebuilds can interleave like they
 		// can against a real pipeline.
 		batchSeen := make(map[string]bool, len(body.Requests))
@@ -468,8 +534,8 @@ func TestConcurrentCatalogRebuildsAreMonotonicAndDeduplicated(t *testing.T) {
 			sql := req.Stmt.SQL
 			state.allSQL = append(state.allSQL, sql)
 			switch {
-			case strings.HasPrefix(sql, "DELETE FROM catalog"):
-				state.rows = make(map[string]struct{})
+			case strings.HasPrefix(sql, "DELETE FROM catalog WHERE sku=?"):
+				delete(state.rows, lib.ToString(req.Stmt.Args[0].Value))
 			case strings.HasPrefix(sql, "INSERT INTO catalog "):
 				sku := lib.ToString(req.Stmt.Args[0].Value)
 				if batchSeen[sku] {
@@ -579,8 +645,81 @@ func TestConcurrentCatalogRebuildsAreMonotonicAndDeduplicated(t *testing.T) {
 	}
 }
 
+func TestCatalogRebuildPreservesClearsAndSetsPins(t *testing.T) {
+	var mu sync.Mutex
+	var captured [][]lib.TursoStmt
+	srv, posts := catalogMock(t, []string{"A", "GONE"}, func(stmts []lib.TursoStmt) {
+		mu.Lock()
+		defer mu.Unlock()
+		captured = append(captured, append([]lib.TursoStmt(nil), stmts...))
+	})
+	defer srv.Close()
+
+	products := []interface{}{
+		map[string]interface{}{"sku": "A", "name": "Alpha", "sale_price": "10", "vat_rate": "20", "stock": 1, "active": true},
+		map[string]interface{}{"sku": "B", "name": "Beta", "sale_price": "12", "pinned_price": "", "vat_rate": "20", "stock": 1, "active": true},
+		map[string]interface{}{"sku": "C", "name": "Gamma", "sale_price": "0", "pinned_price": "149.00", "vat_rate": "20", "stock": 1, "active": false},
+		map[string]interface{}{"sku": "D", "name": "Delta", "sale_price": "5", "pinned_price": nil, "vat_rate": "20", "stock": 1, "active": true},
+	}
+	rec := putCatalog(t, map[string]interface{}{"version": 1, "products": products})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if got := atomic.LoadInt64(posts); got != 3 {
+		t.Fatalf("posts=%d, want 3 (revision read + SKU read + write batch)", got)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(captured) != 1 {
+		t.Fatalf("captured %d write batches, want 1", len(captured))
+	}
+	stmts := captured[0]
+	if len(stmts) != 1+4+1 {
+		t.Fatalf("statements=%d, want 1 delete + 4 upserts + meta: %#v", len(stmts), stmts)
+	}
+	if stmts[0].SQL != "DELETE FROM catalog WHERE sku=?" || lib.ToString(stmts[0].Args[0].Value) != "GONE" {
+		t.Fatalf("only SKUs absent from the snapshot may be deleted: %q", stmts[0].SQL)
+	}
+	want := map[string]struct {
+		typ   string
+		value string
+	}{
+		"A": {"null", ""},
+		"B": {"text", ""},
+		"C": {"text", "149.00"},
+		"D": {"null", ""},
+	}
+	for _, stmt := range stmts[1 : len(stmts)-1] {
+		if stmt.SQL != catalogInsertSQL {
+			t.Fatalf("unexpected upsert SQL: %q", stmt.SQL)
+		}
+		if len(stmt.Args) != 9 {
+			t.Fatalf("upsert has %d args, want 9", len(stmt.Args))
+		}
+		sku := lib.ToString(stmt.Args[0].Value)
+		expected, ok := want[sku]
+		if !ok {
+			t.Fatalf("unexpected upserted SKU %q", sku)
+		}
+		pin := stmt.Args[2]
+		if pin.Type != expected.typ || lib.ToString(pin.Value) != expected.value {
+			t.Fatalf("SKU %q pin=%#v, want type=%q value=%q", sku, pin, expected.typ, expected.value)
+		}
+		delete(want, sku)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing upserts for %v", want)
+	}
+	if !strings.Contains(stmts[len(stmts)-1].SQL, "catalog_meta") {
+		t.Fatalf("last statement must bump the version: %q", stmts[len(stmts)-1].SQL)
+	}
+	if !strings.Contains(catalogInsertSQL, "excluded.pinned_price IS NULL") {
+		t.Fatalf("upsert must preserve pins when the incoming key is null: %q", catalogInsertSQL)
+	}
+}
+
 func TestCatalogRebuildRejectsStaleRevisionAndAcceptsDecimalComma(t *testing.T) {
-	var writes int64
+	var writes, skuReads int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body lib.TursoPipelineBody
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -593,11 +732,17 @@ func TestCatalogRebuildRejectsStaleRevisionAndAcceptsDecimalComma(t *testing.T) 
 			w.Write(catalogMetaPayload(500, 100))
 			return
 		}
+		if len(body.Requests) == 1 &&
+			strings.Contains(body.Requests[0].Stmt.SQL, "SELECT sku FROM catalog") {
+			atomic.AddInt64(&skuReads, 1)
+			w.Write(catalogSKUsPayload(nil))
+			return
+		}
 		atomic.AddInt64(&writes, 1)
 		for _, stmt := range body.Requests {
 			if strings.HasPrefix(stmt.Stmt.SQL, "INSERT INTO catalog ") &&
-				lib.ToString(stmt.Stmt.Args[2].Value) != "10.50" {
-				t.Errorf("decimal comma was not canonicalized: %q", lib.ToString(stmt.Stmt.Args[2].Value))
+				lib.ToString(stmt.Stmt.Args[3].Value) != "10.50" {
+				t.Errorf("decimal comma was not canonicalized: %q", lib.ToString(stmt.Stmt.Args[3].Value))
 			}
 		}
 		w.Write(catalogPayload(len(body.Requests)))
@@ -622,6 +767,9 @@ func TestCatalogRebuildRejectsStaleRevisionAndAcceptsDecimalComma(t *testing.T) 
 	}
 	if got := atomic.LoadInt64(&writes); got != 0 {
 		t.Fatalf("stale payload wrote %d batches", got)
+	}
+	if got := atomic.LoadInt64(&skuReads); got != 0 {
+		t.Fatalf("stale payload read the catalog %d times before the revision check", got)
 	}
 
 	fresh := putCatalog(t, map[string]interface{}{

@@ -33,26 +33,37 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	if len(res.Rows) > 0 {
 		version = lib.ToInt64(res.Rows[0][0])
 	}
-	if reqVer >= version && version > 0 {
+	// A mode switch (pricing view vs sales catalog) must never be answered
+	// from a cached 304: the two modes have different bodies at the same
+	// catalog version.
+	includeUnpriced := r.URL.Query().Get("include_unpriced") == "1"
+	if !includeUnpriced && reqVer >= version && version > 0 {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	rows, err := db.Execute("SELECT sku, name, sale_price, vat_rate, stock, active, category, brand FROM catalog")
+	rows, err := db.Execute("SELECT sku, name, sale_price, pinned_price, vat_rate, stock, active, category, brand FROM catalog")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	products := []map[string]interface{}{}
 	for _, row := range rows.Rows {
+		effectivePrice, priced := lib.CatalogEffectivePrice(row[3], row[2])
+		if !priced && !includeUnpriced {
+			continue
+		}
 		products = append(products, map[string]interface{}{
-			"sku":        lib.ToString(row[0]),
-			"name":       lib.ToString(row[1]),
-			"sale_price": lib.ToString(row[2]),
-			"vat_rate":   lib.ToString(row[3]),
-			"stock":      lib.ToInt(row[4]),
-			"active":     lib.ToInt(row[5]) == 1,
-			"category":   lib.NullIface(row[6]),
-			"brand":      lib.NullIface(row[7]),
+			"sku":             lib.ToString(row[0]),
+			"name":            lib.ToString(row[1]),
+			"sale_price":      lib.ToString(row[2]),
+			"pinned_price":    lib.NullIface(row[3]),
+			"effective_price": effectivePrice,
+			"priced":          priced,
+			"vat_rate":        lib.ToString(row[4]),
+			"stock":           lib.ToInt(row[5]),
+			"active":          lib.ToInt(row[6]) == 1,
+			"category":        lib.NullIface(row[7]),
+			"brand":           lib.NullIface(row[8]),
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")

@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -249,3 +251,20 @@ func normalizeResult(res *TursoResult) {
 func Text(v string) TursoArg { return TursoArg{Type: "text", Value: v} }
 func Int(v int64) TursoArg   { return TursoArg{Type: "integer", Value: fmt.Sprintf("%d", v)} }
 func Null() TursoArg         { return TursoArg{Type: "null"} }
+
+// CatalogEffectivePrice resolves the authoritative retail price of a catalog
+// row. A pin wins only when it is non-empty; both SQL NULL (never pinned) and
+// ” (explicitly cleared) fall back to the base sale price. priced follows
+// effective_price > 0. Stored values that cannot be parsed are reported as
+// unpriced rather than being surfaced to a sales surface.
+func CatalogEffectivePrice(pinned, sale interface{}) (effectivePrice string, priced bool) {
+	effectivePrice = NullStr(sale)
+	if pin := NullStr(pinned); pin != "" {
+		effectivePrice = pin
+	}
+	f, err := strconv.ParseFloat(strings.TrimSpace(effectivePrice), 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f <= 0 {
+		return effectivePrice, false
+	}
+	return effectivePrice, true
+}

@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import PairView from './views/PairView.vue'
 import CatalogView from './views/CatalogView.vue'
 import InventoryView from './views/InventoryView.vue'
+import NeedsPricingView from './views/NeedsPricingView.vue'
 import SalesView from './views/SalesView.vue'
 import InvoiceDetailView from './views/InvoiceDetailView.vue'
 import PurchasesView from './views/PurchasesView.vue'
@@ -20,6 +21,7 @@ const routes = [
   { path: '/pair', component: PairView },
   { path: '/catalog', component: CatalogView },
   { path: '/inventory', component: InventoryView },
+  { path: '/needs-pricing', component: NeedsPricingView },
   { path: '/sales', component: SalesView },
   { path: '/sales/:id', component: InvoiceDetailView },
   { path: '/purchases', component: PurchasesView },

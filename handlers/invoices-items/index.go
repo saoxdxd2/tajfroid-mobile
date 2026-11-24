@@ -28,15 +28,15 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var body struct {
-			ID                string `json:"id"` // optional client idempotency key
-			InvoiceID         string `json:"invoiceId"`
-			ProductSKU        string `json:"productSku"`
-			ProductName       string `json:"productName"`
-			Quantity          int    `json:"quantity"`
-			UnitPrice         string `json:"unitPrice"`
-			VatRate           string `json:"vatRate"`
-			UnitCost          string `json:"unitCost"`
-			WarrantyMonths    int    `json:"warrantyMonths"`
+			ID                  string `json:"id"` // optional client idempotency key
+			InvoiceID           string `json:"invoiceId"`
+			ProductSKU          string `json:"productSku"`
+			ProductName         string `json:"productName"`
+			Quantity            int    `json:"quantity"`
+			UnitPrice           string `json:"unitPrice"`
+			VatRate             string `json:"vatRate"`
+			UnitCost            string `json:"unitCost"`
+			WarrantyMonths      int    `json:"warrantyMonths"`
 			DescriptionOverride string `json:"descriptionOverride"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
@@ -64,12 +64,12 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "forbidden: cannot modify an invoice after it has left Draft state", http.StatusBadRequest)
 			return
 		}
-		prod, err := db.Execute("SELECT name, purchase_price, sale_price, vat_rate, active FROM catalog WHERE sku = ?", lib.Text(body.ProductSKU))
+		prod, err := db.Execute("SELECT name, purchase_price, sale_price, pinned_price, vat_rate, active FROM catalog WHERE sku = ?", lib.Text(body.ProductSKU))
 		if err != nil || len(prod.Rows) == 0 {
 			http.Error(w, "product not found", http.StatusNotFound)
 			return
 		}
-		if lib.ToInt(prod.Rows[0][4]) != 1 {
+		if lib.ToInt(prod.Rows[0][5]) != 1 {
 			http.Error(w, "product is archived", http.StatusBadRequest)
 			return
 		}
@@ -79,11 +79,13 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		}
 		unitPrice := body.UnitPrice
 		if unitPrice == "" {
-			unitPrice = lib.ToString(prod.Rows[0][2])
+			// Server fallback follows the same effective-price rule as every
+			// sales surface: a non-empty pin wins over the base sale price.
+			unitPrice, _ = lib.CatalogEffectivePrice(prod.Rows[0][3], prod.Rows[0][2])
 		}
 		vatRate := body.VatRate
 		if vatRate == "" {
-			vatRate = lib.ToString(prod.Rows[0][3])
+			vatRate = lib.ToString(prod.Rows[0][4])
 		}
 		unitCost := body.UnitCost
 		if unitCost == "" {
@@ -232,7 +234,6 @@ func formatRate(s string) string {
 type errText string
 
 func (e errText) Error() string { return string(e) }
-
 
 func nullableText(s string) lib.TursoArg {
 	if s == "" {

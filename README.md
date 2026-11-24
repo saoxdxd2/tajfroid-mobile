@@ -36,6 +36,17 @@ go test ./lib -run TestWarmExecuteLatencyAndConnectionReuse -v
 `libsodium-wrappers` is intentionally a lazy chunk: it is loaded only when a
 scan is encrypted, never on app start.
 
+## Offline app shell
+
+In production the `/sw.js` service worker caches only the app shell (HTML,
+manifest, icons and hashed JS/CSS assets, including the lazy libsodium chunk)
+after the first online load, so the UI works offline afterwards. API data —
+including auth, QR lookups and ciphertext — is never cached.
+
+To remove the offline shell, unregister the service worker in DevTools
+(Application → Service Workers → Unregister) or call `unregisterAppShell()`
+from `src/lib/pwa.js`; that also deletes the `tajfroid-shell-*` caches.
+
 ## Setup (relay, Go)
 
 ### Get your Turso URL and token

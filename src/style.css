@@ -2,9 +2,8 @@
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+  color: #213042;
+  background-color: #f7f9fc;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -48,6 +47,84 @@ body {
   padding-bottom: 70px;
 }
 
+a { color: #14509b; }
+h1, h2, h3 { color: #18324f; }
+
+input, select, textarea {
+  font: inherit;
+  font-size: 16px;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid #c3cedb;
+  border-radius: 8px;
+  background: #fff;
+  color: #213042;
+}
+
+button, .btn-primary, .btn-link, .connection-pill {
+  min-height: 44px;
+  font: inherit;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+button, .btn-primary {
+  padding: 8px 14px;
+  border: 1px solid #1f3a5f;
+  background: #1f3a5f;
+  color: #fff;
+}
+
+.btn-link {
+  padding: 8px 4px;
+  border: 0;
+  background: none;
+  color: #14509b;
+  text-decoration: underline;
+}
+
+.connection-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  border: 1px solid #ffffff80;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.connection-pill.connected {
+  background: #e8f5e9;
+  border-color: #a5d6a7;
+  color: #1b5e20;
+}
+
+.connection-card {
+  border: 1px solid #c9d8ea;
+  border-left: 4px solid #1f3a5f;
+  border-radius: 10px;
+  padding: 14px;
+  margin: 12px 0;
+  background: #fff;
+}
+
+.connection-card.connected {
+  border-left-color: #2e7d32;
+}
+
+.empty-state {
+  border: 1px dashed #c3cedb;
+  border-radius: 10px;
+  padding: 20px 14px;
+  margin: 12px 0;
+  background: #fff;
+  color: #5b6b7c;
+  text-align: center;
+}
+
 .bottom-nav {
   position: fixed;
   bottom: 0;
@@ -57,12 +134,16 @@ body {
   grid-template-columns: repeat(4, 1fr);
   gap: 4px;
   padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
-  border-top: 1px solid #ccc;
+  border-top: 1px solid #c3cedb;
   background: #1f3a5f;
   z-index: 100;
 }
 
 .bottom-nav a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
   color: #fff;
   text-decoration: none;
   padding: 8px 4px;
@@ -82,11 +163,4 @@ body {
 .view {
   max-width: 600px;
   margin: 0 auto;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
 }

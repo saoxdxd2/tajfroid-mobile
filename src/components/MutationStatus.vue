@@ -1,9 +1,9 @@
 <template>
   <div v-if="items.length || syncing" class="mutation-status">
     <div class="row">
-      <strong>Offline queue</strong>
-      <span v-if="syncing">syncing…</span>
-      <span v-else>{{ pending }} pending, {{ conflicts }} conflicts</span>
+      <strong>{{ COPY.mutationTitle }}</strong>
+      <span v-if="syncing">{{ COPY.mutationSyncing }}</span>
+      <span v-else>{{ COPY.mutationCounts(pending, conflicts) }}</span>
       <button class="link" @click="open = !open">{{ open ? 'Hide' : 'Details' }}</button>
     </div>
     <div v-if="open" class="details">
@@ -54,7 +54,7 @@
           <button v-if="m.status!=='conflict'" @click="remove(m.id)">Dismiss</button>
         </div>
       </div>
-      <p class="hint">Conflicts mean another device changed the same record. "Retry local" resends your payload; "Keep server" discards your queued change.</p>
+      <p class="hint">{{ COPY.mutationHint }}</p>
     </div>
   </div>
 </template>
@@ -62,6 +62,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { apiFetch } from '../lib/api'
+import { COPY } from '../lib/copy'
 import { useMutationStore } from '../stores/mutations'
 const store = useMutationStore()
 const open = ref(false)

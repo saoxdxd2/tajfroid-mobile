@@ -23,7 +23,7 @@
             <span class="due">{{ d.outstanding }} DH</span>
           </li>
         </ul>
-        <p v-if="!summary.debtors.length" class="muted">Nobody owes money. 🎉</p>
+        <p v-if="!summary.debtors.length" class="empty-state">{{ COPY.empty.financeDebtors }}</p>
 
         <h3>Checks due soon</h3>
         <ul class="list">
@@ -32,7 +32,7 @@
             <span>{{ c.amount }} DH · {{ formatDate(c.dueDate) }}</span>
           </li>
         </ul>
-        <p v-if="!summary.upcomingChecks.length" class="muted">No checks due this week.</p>
+        <p v-if="!summary.upcomingChecks.length" class="empty-state">{{ COPY.empty.financeChecksDue }}</p>
       </template>
     </div>
 
@@ -89,7 +89,7 @@
           </div>
         </li>
       </ul>
-      <p v-if="!store.checks.length" class="muted">No checks registered.</p>
+      <p v-if="!store.checks.length" class="empty-state">{{ COPY.empty.financeChecks }}</p>
     </div>
 
     <!-- Expenses -->
@@ -125,7 +125,7 @@
           </div>
         </li>
       </ul>
-      <p v-if="!store.expenses.length" class="muted">No expenses recorded.</p>
+      <p v-if="!store.expenses.length" class="empty-state">{{ COPY.empty.financeExpenses }}</p>
     </div>
 
     <!-- Journal -->
@@ -143,7 +143,7 @@
           </div>
         </li>
       </ul>
-      <p v-if="!store.journal.length" class="muted">Journal is empty.</p>
+      <p v-if="!store.journal.length" class="empty-state">{{ COPY.empty.financeJournal }}</p>
     </div>
   </div>
 </template>
@@ -153,6 +153,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useFinanceStore } from '../stores/finance'
 import { useCustomerStore } from '../stores/customers'
 import { useSupplierStore } from '../stores/suppliers'
+import { COPY } from '../lib/copy'
 
 const store = useFinanceStore()
 const customers = useCustomerStore()

@@ -6,8 +6,8 @@
     </div>
     <h1>Needs pricing</h1>
     <p class="muted">{{ unpriced.length }} product(s) without a retail price. Setting a pin makes them sellable.</p>
-    <p v-if="store.error" class="error">{{ store.error }}</p>
-    <p v-if="store.loading && !unpriced.length">Loading...</p>
+    <p v-if="store.error && unpriced.length" class="error">{{ friendlyMessage(store.error) }}</p>
+    <p v-if="store.loading && !unpriced.length" class="empty-state">{{ COPY.empty.checkingPrices }}</p>
 
     <ul v-if="unpriced.length" class="list">
       <li v-for="p in unpriced" :key="p.sku" class="card">
@@ -24,13 +24,15 @@
         <p v-if="msgs[p.sku]" class="msg">{{ msgs[p.sku] }}</p>
       </li>
     </ul>
-    <p v-else class="muted">All products are priced. <router-link to="/catalog">Back to catalog</router-link></p>
+    <p v-else-if="store.error" class="empty-state">{{ friendlyMessage(store.error) }} <router-link to="/pair">{{ COPY.connectToComputer }}</router-link></p>
+    <p v-else class="empty-state">{{ COPY.empty.needsPricing }} <router-link to="/catalog">Back to catalog</router-link></p>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useInventoryStore } from '../stores/inventory'
+import { COPY, friendlyMessage } from '../lib/copy'
 
 const store = useInventoryStore()
 const draft = ref({})

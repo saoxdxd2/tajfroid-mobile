@@ -12,13 +12,14 @@
         {{ p.sku }} — {{ p.name }} ({{ p.effectivePrice }} DH) — stock: {{ p.stock }}
       </li>
     </ul>
-    <p v-if="!filtered.length" class="muted">No priced products found.</p>
+    <p v-if="!filtered.length" class="empty-state">{{ COPY.empty.catalog }}</p>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useCatalogStore } from '../stores/catalog'
+import { COPY } from '../lib/copy'
 
 const store = useCatalogStore()
 const q = ref('')

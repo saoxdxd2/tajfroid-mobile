@@ -1,10 +1,16 @@
 <template>
   <div class="view">
     <h1>Account</h1>
-    <p>Device paired: {{ paired ? 'yes' : 'no' }}</p>
-    <p class="muted">Relay: {{ relayUrl || 'not set' }}</p>
+    <div class="connection-card" :class="{ connected: paired }">
+      <strong>{{ paired ? COPY.connectedToLaptop : COPY.connectToComputer }}</strong>
+      <p>{{ paired ? COPY.accountConnected : COPY.accountNotConnected }}</p>
+      <p class="muted">{{ COPY.accountHint }}</p>
+      <router-link to="/pair" class="btn-primary">
+        {{ paired ? 'Reconnect or manage connection' : 'Connect to computer' }}
+      </router-link>
+    </div>
 
-    <h2>Paired devices</h2>
+    <h2>Connected devices</h2>
     <button @click="loadDevices" :disabled="loading">{{ loading ? 'Loading…' : 'Refresh' }}</button>
     <p v-if="error" class="err">{{ error }}</p>
     <ul class="list">
@@ -26,11 +32,11 @@ import { computed, onMounted, ref } from 'vue'
 import { useDeviceStore } from '../stores/device'
 import { useMutationStore } from '../stores/mutations'
 import { apiFetch, jsonHeaders, readError } from '../lib/api'
+import { COPY } from '../lib/copy'
 
 const store = useDeviceStore()
 const mutations = useMutationStore()
 const paired = computed(() => !!store.deviceToken)
-const relayUrl = computed(() => store.relayUrl)
 const currentDeviceId = computed(() => store.deviceId)
 const devices = ref([])
 const loading = ref(false)

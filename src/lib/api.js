@@ -1,4 +1,6 @@
 import router from '../router'
+import { COPY, friendlyMessage } from './copy'
+import { useDeviceStore } from '../stores/device'
 
 export function getRelayUrl() {
   return localStorage.getItem('relayUrl') || ''
@@ -17,18 +19,18 @@ export function jsonHeaders() {
   return { 'Content-Type': 'application/json', ...authHeaders() }
 }
 
-export async function readError(res, fallback = 'Request failed') {
+export async function readError(res, fallback = COPY.requestFailed) {
   const text = await res.text().catch(() => '')
   if (!text) return fallback
   try {
     const data = JSON.parse(text)
-    if (typeof data === 'string') return data
-    if (data?.error) return data.error
-    if (data?.message) return data.message
+    if (typeof data === 'string') return friendlyMessage(data)
+    if (data?.error) return friendlyMessage(data.error)
+    if (data?.message) return friendlyMessage(data.message)
   } catch {
     // plain text response
   }
-  return text
+  return friendlyMessage(text)
 }
 
 function shouldRedirectToPair(path) {
@@ -39,7 +41,11 @@ function shouldRedirectToPair(path) {
 
 export async function apiFetch(path, options = {}) {
   const base = getRelayUrl()
-  if (!base) throw new Error('Relay URL is not configured')
+  if (!base) {
+    const error = new Error(COPY.notConnected)
+    error.code = 'NOT_CONNECTED'
+    throw error
+  }
   const url = path.startsWith('http') ? path : `${base}${path}`
   const headers = { ...(options.headers || {}) }
   // Attach auth unless caller explicitly set Authorization or opted out.
@@ -50,8 +56,8 @@ export async function apiFetch(path, options = {}) {
   const res = await fetch(url, { ...options, headers })
   if (res.status === 401 && shouldRedirectToPair(path)) {
     // Token missing/expired/revoked. Keep relay URL but force re-pair.
-    localStorage.removeItem('deviceToken')
-    localStorage.removeItem('deviceId')
+    // Use the store so the header/Account connection state updates immediately.
+    useDeviceStore().clearSession()
     if (router.currentRoute.value.path !== '/pair') {
       router.push({ path: '/pair', query: { reason: 'expired' } }).catch(() => {})
     }
@@ -78,7 +84,7 @@ export async function readConflictResponse(res) {
 
 export async function apiJson(path, options = {}) {
   const res = await apiFetch(path, options)
-  if (!res.ok) throw new Error(await readError(res, `Request failed (${res.status})`))
+  if (!res.ok) throw new Error(await readError(res, COPY.requestFailed))
   if (res.status === 204) return null
   return res.json()
 }

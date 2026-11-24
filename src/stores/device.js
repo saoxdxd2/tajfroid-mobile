@@ -24,5 +24,14 @@ export const useDeviceStore = defineStore('device', () => {
   function setRelayUrl(url) { relayUrl.value = url; localStorage.setItem('relayUrl', url) }
   function setDesktopPublicKey(key) { desktopPublicKey.value = key; localStorage.setItem('desktopPublicKey', key) }
 
-  return { deviceToken, deviceId, relayUrl, desktopPublicKey, pair, setRelayUrl, setDesktopPublicKey }
+  // Called when the relay rejects a stored token. Keep the relay address and
+  // public key so re-pairing can reuse them, but clear the stale identity.
+  function clearSession() {
+    deviceToken.value = ''
+    deviceId.value = ''
+    localStorage.removeItem('deviceToken')
+    localStorage.removeItem('deviceId')
+  }
+
+  return { deviceToken, deviceId, relayUrl, desktopPublicKey, pair, setRelayUrl, setDesktopPublicKey, clearSession }
 })

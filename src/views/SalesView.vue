@@ -49,7 +49,7 @@
         </div>
       </li>
     </ul>
-    <p v-if="!store.loading && !filtered.length" class="muted">No invoices yet.</p>
+    <p v-if="!store.loading && !filtered.length" class="empty-state">{{ COPY.empty.sales }}</p>
   </div>
 </template>
 
@@ -58,6 +58,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSalesStore } from '../stores/sales'
 import { useCustomerStore } from '../stores/customers'
+import { COPY } from '../lib/copy'
 
 const store = useSalesStore()
 const customers = useCustomerStore()

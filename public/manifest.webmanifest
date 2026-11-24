@@ -1,7 +1,7 @@
 {
   "name": "Taj-Froid Mobile",
   "short_name": "TajFroid",
-  "description": "Mobile scanner for Taj-Froid ERP",
+  "description": "Mobile scanner for Taj-Froid ERP with an offline app shell",
   "theme_color": "#1f3a5f",
   "background_color": "#1f3a5f",
   "display": "standalone",

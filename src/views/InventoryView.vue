@@ -10,7 +10,7 @@
 
     <div v-if="showAdd" class="form-card">
       <h3>New product</h3>
-      <input v-model="form.sku" placeholder="SKU (référence)" />
+      <input v-model="form.sku" placeholder="SKU / reference" />
       <input v-model="form.name" placeholder="Name" />
       <input v-model="form.description" placeholder="Description" />
       <input v-model="form.purchasePrice" type="number" placeholder="Purchase price" />
@@ -59,6 +59,7 @@
         </div>
       </li>
     </ul>
+    <p v-if="!store.loading && !filtered.length" class="empty-state">{{ COPY.empty.inventory }}</p>
 
     <!-- Edit modal -->
     <div v-if="editing" class="modal-overlay" @click.self="editing = null">
@@ -92,6 +93,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useInventoryStore } from '../stores/inventory'
+import { COPY } from '../lib/copy'
 
 const store = useInventoryStore()
 const q = ref('')

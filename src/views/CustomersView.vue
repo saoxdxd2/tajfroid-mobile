@@ -49,6 +49,7 @@
         </div>
       </li>
     </ul>
+    <p v-if="!store.loading && !filtered.length" class="empty-state">{{ COPY.empty.customers }}</p>
 
     <!-- Edit modal -->
     <div v-if="editing" class="modal-overlay" @click.self="editing = null">
@@ -71,6 +72,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useCustomerStore } from '../stores/customers'
+import { COPY } from '../lib/copy'
 
 const store = useCustomerStore()
 const q = ref('')

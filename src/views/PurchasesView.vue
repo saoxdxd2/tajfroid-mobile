@@ -45,7 +45,7 @@
         </div>
       </li>
     </ul>
-    <p v-if="!store.loading && !filtered.length" class="muted">No purchases yet.</p>
+    <p v-if="!store.loading && !filtered.length" class="empty-state">{{ COPY.empty.purchases }}</p>
   </div>
 </template>
 
@@ -54,6 +54,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePurchaseStore } from '../stores/purchases'
 import { useSupplierStore } from '../stores/suppliers'
+import { COPY } from '../lib/copy'
 
 const store = usePurchaseStore()
 const suppliers = useSupplierStore()

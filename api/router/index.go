@@ -54,6 +54,7 @@ import (
 	stock "tajfroid-mobile/handlers/stock"
 	suppliers "tajfroid-mobile/handlers/suppliers"
 	suppliersmanage "tajfroid-mobile/handlers/suppliers-manage"
+	syncapi "tajfroid-mobile/handlers/sync"
 	"tajfroid-mobile/lib"
 )
 
@@ -205,6 +206,8 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		productsmanage.Handler(w, r)
 	case "stock":
 		stock.Handler(w, r)
+	case "sync/hlc":
+		syncapi.Handler(w, r)
 	case "categories":
 		categories.Handler(w, r)
 	case "categories/manage":

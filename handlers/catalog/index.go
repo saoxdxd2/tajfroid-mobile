@@ -41,10 +41,14 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	rows, err := db.Execute("SELECT sku, name, sale_price, pinned_price, vat_rate, stock, active, category, brand FROM catalog")
+	rows, err := db.Execute("SELECT sku, name, sale_price, pinned_price, vat_rate, stock, active, category, brand, no_sku, display_sku, sku_warning, is_return, return_qty, sealed_qty, return_label, price_status FROM catalog")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		// Backward-compatible fallback if older DB has not run migration yet
+		rows, err = db.Execute("SELECT sku, name, sale_price, pinned_price, vat_rate, stock, active, category, brand FROM catalog")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 	products := []map[string]interface{}{}
 	for _, row := range rows.Rows {
@@ -52,15 +56,52 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		if !priced && !includeUnpriced {
 			continue
 		}
+		sku := lib.ToString(row[0])
+		noSKU := false
+		displaySKU := sku
+		var skuWarning interface{}
+		isReturn := false
+		returnQty := 0
+		stock := lib.ToInt(row[5])
+		sealedQty := stock
+		var returnLabel interface{}
+		priceStatus := "PRICED"
+		if !priced {
+			priceStatus = "NO_PRICE"
+		}
+		if len(row) >= 17 {
+			noSKU = lib.ToInt(row[9]) == 1
+			if ds := lib.NullStr(row[10]); ds != "" {
+				displaySKU = ds
+			} else if noSKU {
+				displaySKU = "NO SKU"
+			}
+			skuWarning = lib.NullIface(row[11])
+			isReturn = lib.ToInt(row[12]) == 1
+			returnQty = lib.ToInt(row[13])
+			sealedQty = lib.ToInt(row[14])
+			returnLabel = lib.NullIface(row[15])
+			if ps := lib.NullStr(row[16]); ps != "" {
+				priceStatus = ps
+			}
+		}
 		products = append(products, map[string]interface{}{
-			"sku":             lib.ToString(row[0]),
+			"sku":             sku,
+			"display_sku":     displaySKU,
+			"no_sku":          noSKU,
+			"sku_warning":     skuWarning,
 			"name":            lib.ToString(row[1]),
 			"sale_price":      lib.ToString(row[2]),
 			"pinned_price":    lib.NullIface(row[3]),
 			"effective_price": effectivePrice,
 			"priced":          priced,
+			"price_status":    priceStatus,
 			"vat_rate":        lib.ToString(row[4]),
-			"stock":           lib.ToInt(row[5]),
+			"stock":           stock,
+			"sealed_qty":      sealedQty,
+			"is_return":       isReturn,
+			"return_qty":      returnQty,
+			"return_label":    returnLabel,
 			"active":          lib.ToInt(row[6]) == 1,
 			"category":        lib.NullIface(row[7]),
 			"brand":           lib.NullIface(row[8]),

@@ -313,8 +313,8 @@ func TestCatalogRebuildSanitizesAndDeduplicates1000Products(t *testing.T) {
 		if stmt.SQL != catalogInsertSQL {
 			t.Fatalf("statement %d is not the parameterized upsert: %q", i+1, stmt.SQL)
 		}
-		if len(stmt.Args) != 9 {
-			t.Fatalf("statement %d has %d args, want 9", i+1, len(stmt.Args))
+		if len(stmt.Args) != 17 {
+			t.Fatalf("statement %d has %d args, want 17", i+1, len(stmt.Args))
 		}
 		sku := lib.ToString(stmt.Args[0].Value)
 		if seen[sku] {
@@ -693,8 +693,8 @@ func TestCatalogRebuildPreservesClearsAndSetsPins(t *testing.T) {
 		if stmt.SQL != catalogInsertSQL {
 			t.Fatalf("unexpected upsert SQL: %q", stmt.SQL)
 		}
-		if len(stmt.Args) != 9 {
-			t.Fatalf("upsert has %d args, want 9", len(stmt.Args))
+		if len(stmt.Args) != 17 {
+			t.Fatalf("upsert has %d args, want 17", len(stmt.Args))
 		}
 		sku := lib.ToString(stmt.Args[0].Value)
 		expected, ok := want[sku]

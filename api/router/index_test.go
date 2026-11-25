@@ -18,14 +18,14 @@ func TestRouterDispatchesKnownRoutes(t *testing.T) {
 		// than 401.
 		{"/api/router?__route=pair", http.StatusMethodNotAllowed},
 		// Every data route is protected: with no Authorization header the
-		// router answers 401 before any handler or database work.
-		{"/api/router?__route=invoices", http.StatusUnauthorized},
-		{"/api/router?__route=products/manage&sku=X", http.StatusUnauthorized},
-		{"/api/router?__route=purchases", http.StatusUnauthorized},
-		{"/api/router?__route=finance", http.StatusUnauthorized},
+		// router answers stealth 404 before any handler or database work.
+		{"/api/router?__route=invoices", http.StatusNotFound},
+		{"/api/router?__route=products/manage&sku=X", http.StatusNotFound},
+		{"/api/router?__route=purchases", http.StatusNotFound},
+		{"/api/router?__route=finance", http.StatusNotFound},
 		// Unknown routes are also behind auth, so the relay never exposes
 		// which route names exist to an anonymous caller.
-		{"/api/router?__route=does-not-exist", http.StatusUnauthorized},
+		{"/api/router?__route=does-not-exist", http.StatusNotFound},
 	}
 	for _, tc := range cases {
 		req := httptest.NewRequest(http.MethodGet, tc.target, nil)

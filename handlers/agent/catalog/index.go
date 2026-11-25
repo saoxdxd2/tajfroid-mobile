@@ -32,24 +32,35 @@ const (
 	catalogMaxStock      = int64(1000000000)
 )
 
-const catalogInsertSQL = "INSERT INTO catalog (sku, name, pinned_price, sale_price, vat_rate, stock, active, category, brand) VALUES (?,?,?,?,?,?,?,?,?) " +
+const catalogInsertSQL = "INSERT INTO catalog (sku, name, pinned_price, sale_price, vat_rate, stock, active, category, brand, no_sku, display_sku, sku_warning, is_return, return_qty, sealed_qty, return_label, price_status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) " +
 	"ON CONFLICT(sku) DO UPDATE SET name=excluded.name, " +
 	// A legacy client that omits (or nulls) pinned_price must not wipe a pin
 	// entered on the phone. An explicit '' clears it; a decimal sets it.
 	"pinned_price = CASE WHEN excluded.pinned_price IS NULL THEN catalog.pinned_price ELSE excluded.pinned_price END, " +
 	"sale_price=excluded.sale_price, vat_rate=excluded.vat_rate, " +
-	"stock=excluded.stock, active=excluded.active, category=excluded.category, brand=excluded.brand"
+	"stock=excluded.stock, active=excluded.active, category=excluded.category, brand=excluded.brand, " +
+	"no_sku=excluded.no_sku, display_sku=excluded.display_sku, sku_warning=excluded.sku_warning, " +
+	"is_return=excluded.is_return, return_qty=excluded.return_qty, sealed_qty=excluded.sealed_qty, " +
+	"return_label=excluded.return_label, price_status=excluded.price_status"
 
 type catalogRow struct {
-	sku       string
-	name      string
-	pinned    lib.TursoArg
-	salePrice string
-	vatRate   string
-	stock     int64
-	active    int64
-	category  lib.TursoArg
-	brand     lib.TursoArg
+	sku         string
+	name        string
+	pinned      lib.TursoArg
+	salePrice   string
+	vatRate     string
+	stock       int64
+	active      int64
+	category    lib.TursoArg
+	brand       lib.TursoArg
+	noSKU       int64
+	displaySKU  lib.TursoArg
+	skuWarning  lib.TursoArg
+	isReturn    int64
+	returnQty   int64
+	sealedQty   int64
+	returnLabel lib.TursoArg
+	priceStatus string
 }
 
 func Handler(w http.ResponseWriter, r *http.Request) {
@@ -159,6 +170,8 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 			Args: []lib.TursoArg{
 				lib.Text(p.sku), lib.Text(p.name), p.pinned, lib.Text(p.salePrice), lib.Text(p.vatRate),
 				lib.Int(p.stock), lib.Int(p.active), p.category, p.brand,
+				lib.Int(p.noSKU), p.displaySKU, p.skuWarning, lib.Int(p.isReturn), lib.Int(p.returnQty),
+				lib.Int(p.sealedQty), p.returnLabel, lib.Text(p.priceStatus),
 			},
 		})
 	}
@@ -237,16 +250,51 @@ func prepareCatalogProducts(raw []map[string]interface{}) ([]catalogRow, error) 
 			return nil, err
 		}
 
+		noSKU, _ := parseCatalogActive(p["no_sku"])
+		isReturn, _ := parseCatalogActive(p["is_return"])
+		returnQty, _ := parseCatalogStock(p["return_qty"])
+		sealedQty := stock - returnQty
+		if sealedQty < 0 {
+			sealedQty = 0
+		}
+		if rawSealed, ok := p["sealed_qty"]; ok && rawSealed != nil {
+			if sq, sqErr := parseCatalogStock(rawSealed); sqErr == nil {
+				sealedQty = sq
+			}
+		}
+		displaySKU := lib.Text(sku)
+		if ds, err := catalogNullable(p["display_sku"], "display_sku", i); err == nil && ds.Type == "text" {
+			displaySKU = ds
+		} else if noSKU == 1 {
+			displaySKU = lib.Text("NO SKU")
+		}
+		skuWarning, _ := catalogNullable(p["sku_warning"], "sku_warning", i)
+		returnLabel, _ := catalogNullable(p["return_label"], "return_label", i)
+		priceStatus := "NO_PRICE"
+		if ps := strings.TrimSpace(lib.ToString(p["price_status"])); ps != "" && ps != "<nil>" {
+			priceStatus = ps
+		} else if salePrice != "0" || (pinned.Type == "text" && lib.ToString(pinned.Value) != "") {
+			priceStatus = "PRICED"
+		}
+
 		row := catalogRow{
-			sku:       sku,
-			name:      name,
-			pinned:    pinned,
-			salePrice: salePrice,
-			vatRate:   vatRate,
-			stock:     stock,
-			active:    active,
-			category:  category,
-			brand:     brand,
+			sku:         sku,
+			name:        name,
+			pinned:      pinned,
+			salePrice:   salePrice,
+			vatRate:     vatRate,
+			stock:       stock,
+			active:      active,
+			category:    category,
+			brand:       brand,
+			noSKU:       noSKU,
+			displaySKU:  displaySKU,
+			skuWarning:  skuWarning,
+			isReturn:    isReturn,
+			returnQty:   returnQty,
+			sealedQty:   sealedQty,
+			returnLabel: returnLabel,
+			priceStatus: priceStatus,
 		}
 		if existing, ok := indexBySKU[sku]; ok {
 			rows[existing] = row

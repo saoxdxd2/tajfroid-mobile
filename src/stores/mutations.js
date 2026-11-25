@@ -332,14 +332,42 @@ async function flushOnce(view) {
   await pruneApplied(view)
 }
 
+const activeTimers = new Set()
+let retryTimer = null
+const RETRY_BASE_MS = 5000
+const RETRY_MAX_MS = 300000
+
+function computeBackoffMs(attempts) {
+  const step = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * Math.pow(3, Math.max(0, attempts - 1)))
+  const jitter = Math.floor(step * 0.2 * Math.random())
+  return step + jitter
+}
+
 export const useMutationStore = defineStore('mutations', () => {
   const items = ref([])
   const index = new Map()
   const byKey = new Map()
   const syncing = ref(false)
   const lastError = ref('')
+  const nextRetryAt = ref(0)
   const view = { items, index, byKey, lastError, syncing, loaded: false }
   views.add(view)
+
+  function scheduleNextRetry() {
+    if (typeof window === 'undefined') return
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null }
+    const pendingItems = items.value.filter(x => x && x.status === 'pending')
+    if (!pendingItems.length) { nextRetryAt.value = 0; return }
+    const maxAttempts = Math.max(1, ...pendingItems.map(x => Number(x.attempts) || 1))
+    const delayMs = computeBackoffMs(maxAttempts)
+    nextRetryAt.value = Date.now() + delayMs
+    retryTimer = setTimeout(() => {
+      retryTimer = null
+      if (typeof navigator === 'undefined' || navigator.onLine) {
+        requestFlush()
+      }
+    }, delayMs)
+  }
 
   function requestFlush() {
     if (activeFlush) { flushAgain = true; return }
@@ -407,6 +435,7 @@ export const useMutationStore = defineStore('mutations', () => {
       syncing.value = false
       activeFlush = null
       release()
+      scheduleNextRetry()
     }
   }
 
@@ -488,5 +517,5 @@ export const useMutationStore = defineStore('mutations', () => {
     return counts
   }
 
-  return { items, syncing, lastError, load, enqueue, flush, remove, retry, updateBody, recordConflict, conflictFromResponse, statusCounts }
+  return { items, syncing, lastError, nextRetryAt, load, enqueue, flush, remove, retry, updateBody, recordConflict, conflictFromResponse, statusCounts }
 })

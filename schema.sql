@@ -52,8 +52,46 @@ CREATE TABLE IF NOT EXISTS catalog (
   stock INTEGER NOT NULL DEFAULT 0,
   active INTEGER NOT NULL DEFAULT 1,
   category TEXT,
-  brand TEXT
+  brand TEXT,
+  no_sku INTEGER NOT NULL DEFAULT 0,
+  display_sku TEXT,
+  sku_warning TEXT,
+  is_return INTEGER NOT NULL DEFAULT 0,
+  return_qty INTEGER NOT NULL DEFAULT 0,
+  sealed_qty INTEGER NOT NULL DEFAULT 0,
+  return_label TEXT,
+  price_status TEXT NOT NULL DEFAULT 'NO_PRICE'
 );
+
+-- HLC + Field-level CRDT sync log & field clocks
+CREATE TABLE IF NOT EXISTS sync_ops (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  op_id TEXT NOT NULL UNIQUE,
+  device_id TEXT NOT NULL,
+  entity TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  op_kind TEXT NOT NULL, -- 'field_set' | 'stock_delta'
+  field TEXT,
+  value_json TEXT,
+  delta_int INTEGER DEFAULT 0,
+  hlc TEXT NOT NULL,
+  base_hlc TEXT,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sync_field_clocks (
+  entity TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  field TEXT NOT NULL,
+  hlc TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  value_json TEXT,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (entity, entity_id, field)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_ops_entity ON sync_ops(entity, entity_id);
+CREATE INDEX IF NOT EXISTS idx_sync_ops_hlc ON sync_ops(hlc);
 
 CREATE TABLE IF NOT EXISTS scans (
   id TEXT PRIMARY KEY,

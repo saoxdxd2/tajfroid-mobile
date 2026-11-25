@@ -54,7 +54,7 @@ export async function apiFetch(path, options = {}) {
     if (token) headers.Authorization = `Bearer ${token}`
   }
   const res = await fetch(url, { ...options, headers })
-  if (res.status === 401 && shouldRedirectToPair(path)) {
+  if ((res.status === 401 || (res.status === 404 && !path.startsWith('/api/pair'))) && shouldRedirectToPair(path)) {
     // Token missing/expired/revoked. Keep relay URL but force re-pair.
     // Use the store so the header/Account connection state updates immediately.
     useDeviceStore().clearSession()

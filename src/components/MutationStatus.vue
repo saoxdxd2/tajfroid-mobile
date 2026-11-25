@@ -1,60 +1,56 @@
 <template>
-  <div v-if="items.length || syncing" class="mutation-status">
-    <div class="row">
-      <strong>{{ COPY.mutationTitle }}</strong>
-      <span v-if="syncing">{{ COPY.mutationSyncing }}</span>
-      <span v-else>{{ COPY.mutationCounts(pending, conflicts) }}</span>
-      <button class="link" @click="open = !open">{{ open ? 'Hide' : 'Details' }}</button>
+  <div v-if="items.length || syncing" class="fixed left-3 right-3 bottom-20 z-30 max-w-xl mx-auto rounded-2xl bg-amber-50/95 backdrop-blur border border-amber-300 shadow-lg p-3 text-xs">
+    <div class="flex items-center gap-2">
+      <span class="w-2 h-2 rounded-full shrink-0" :class="conflicts ? 'bg-rose-600' : 'bg-amber-500 animate-pulse'"></span>
+      <strong class="text-amber-950">{{ COPY.mutationTitle }}</strong>
+      <span v-if="syncing" class="text-amber-800">{{ COPY.mutationSyncing }}</span>
+      <span v-else class="text-amber-800">{{ COPY.mutationCounts(pending, conflicts) }}</span>
+      <button type="button" class="ml-auto font-semibold text-blue-800 underline" @click="store.flush()">Sync</button>
+      <button type="button" class="font-semibold text-slate-700 underline" @click="open = !open">{{ open ? 'Hide' : 'Details' }}</button>
     </div>
-    <div v-if="open" class="details">
-      <div v-for="m in items" :key="m.id" class="item" :class="m.status">
-        <div class="meta">
-          <span class="badge">{{ m.status }}</span>
-          <span>{{ m.entity || 'mutation' }} {{ m.method }}</span>
+
+    <div v-if="open" class="mt-2.5 max-h-[42vh] overflow-y-auto space-y-2 border-t border-amber-200 pt-2">
+      <p v-if="uiNotice" class="px-2.5 py-1.5 rounded-lg bg-rose-100 text-rose-900 font-semibold">{{ uiNotice }}</p>
+      <div v-for="m in items" :key="m.id" class="bg-white rounded-xl border border-amber-200 p-2.5 space-y-1.5">
+        <div class="flex items-center gap-2">
+          <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase text-white"
+                :class="m.status === 'conflict' ? 'bg-rose-600' : 'bg-amber-600'">
+            {{ m.status }}
+          </span>
+          <span class="font-semibold text-slate-800">{{ m.entity || 'mutation' }} {{ m.method }}</span>
+          <span class="text-slate-400 ml-auto">#{{ m.attempts || 0 }}</span>
         </div>
-        <div class="path">{{ m.path }}</div>
-        <div v-if="m.lastError" class="err">{{ m.lastError }}</div>
-        <div v-if="m.conflict" class="conflict-box"><strong>Server conflict:</strong> <pre>{{ formatted[m.id]?.conflictBox }}</pre></div>
-        <div v-if="m.status==='conflict'" class="actions">
-          <button @click="fetchServer(m)">Load server for diff</button>
+        <div class="text-[11px] text-slate-500 break-all">{{ m.path }}</div>
+        <div v-if="m.lastError" class="text-[11px] text-rose-700 whitespace-pre-wrap">{{ m.lastError }}</div>
+
+        <div v-if="m.status === 'conflict'" class="flex flex-wrap gap-1.5">
+          <button type="button" @click="fetchServer(m)" class="px-2.5 py-1 rounded-lg bg-slate-900 text-white font-semibold">Load server diff</button>
         </div>
-        <details v-if="m.status==='conflict'" class="payload"><summary>Paste server JSON for merge</summary>
-          <textarea v-model="serverPaste[m.id]" rows="4" class="edit" placeholder='{"field":"serverValue"}'></textarea>
-          <div class="actions"><button @click="useServerPaste(m)">Use pasted server JSON</button></div>
-        </details>
-        <div v-if="server[m.id]" class="diff">
-          <div class="diff-head"><strong>Field</strong><strong>Local</strong><strong>Server</strong><strong>Conflict</strong><strong>Use</strong></div>
-          <div v-for="k in diffKeysByItem[m.id] || []" :key="k" class="diff-row">
-            <span class="k">{{ k }}</span>
-            <span class="v">{{ formatted[m.id]?.local?.[k] }}</span>
-            <span class="v">{{ formatted[m.id]?.server?.[k] }}</span>
-            <span class="v">{{ formatted[m.id]?.conflict?.[k] }}</span>
-            <span class="pick">
-              <label><input type="radio" :name="m.id+k" :checked="pickOf(m,k)==='local'" @change="choose(m.id,k,'local')">L</label>
-              <label><input type="radio" :name="m.id+k" :checked="pickOf(m,k)==='server'" @change="choose(m.id,k,'server')">S</label>
-              <label v-if="hasConflict(m,k)"><input type="radio" :name="m.id+k" :checked="pickOf(m,k)==='conflict'" @change="choose(m.id,k,'conflict')">C</label>
+
+        <div v-if="server[m.id]" class="border border-slate-200 rounded-lg p-2 bg-slate-50 space-y-1">
+          <div class="grid grid-cols-4 gap-1 font-bold text-[10px] text-slate-600">
+            <span>Field</span><span>Local</span><span>Server</span><span>Pick</span>
+          </div>
+          <div v-for="k in diffKeysByItem[m.id] || []" :key="k" class="grid grid-cols-4 gap-1 items-center border-t border-slate-200 pt-1">
+            <span class="font-mono text-[10px]">{{ k }}</span>
+            <span class="text-[10px] break-all">{{ formatted[m.id]?.local?.[k] }}</span>
+            <span class="text-[10px] break-all">{{ formatted[m.id]?.server?.[k] }}</span>
+            <span class="flex gap-1.5 text-[10px]">
+              <label><input type="radio" :name="m.id+k" :checked="pickOf(m,k)==='local'" @change="choose(m.id,k,'local')"> L</label>
+              <label><input type="radio" :name="m.id+k" :checked="pickOf(m,k)==='server'" @change="choose(m.id,k,'server')"> S</label>
             </span>
           </div>
-          <div class="actions"><button @click="applyMerge(m)">Apply merged payload</button></div>
+          <button type="button" @click="applyMerge(m)" class="mt-1 px-2.5 py-1 rounded-lg bg-blue-700 text-white font-semibold">Apply merge</button>
         </div>
-        <details v-if="m.body" class="payload"><summary>Payload / merge</summary>
-          <div v-if="isFlat(m.body)" class="fields">
-            <label v-for="(v,k) in m.body" :key="k" class="field">
-              <span>{{ k }}</span>
-              <input :value="fieldValue(m.id,k,v)" @input="setField(m.id,k,$event.target.value,v)" />
-            </label>
-          </div>
-          <textarea v-else v-model="edits[m.id]" rows="5" class="edit"></textarea>
-          <div class="actions"><button @click="savePayload(m.id)">Save payload</button></div>
-        </details>
-        <div class="actions">
-          <button v-if="m.status==='conflict'" @click="retry(m.id)">Retry local</button>
-          <button v-if="m.status==='conflict'" @click="dismiss(m.id)">Keep server (dismiss)</button>
-          <button v-if="m.status!=='conflict'" @click="retry(m.id)">Retry</button>
-          <button v-if="m.status!=='conflict'" @click="remove(m.id)">Dismiss</button>
+
+        <div class="flex gap-2 pt-1">
+          <button v-if="m.status==='conflict'" type="button" @click="retry(m.id)" class="px-2.5 py-1 rounded-lg bg-blue-700 text-white font-semibold">Retry local</button>
+          <button v-if="m.status==='conflict'" type="button" @click="dismiss(m.id)" class="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 font-semibold">Keep server</button>
+          <button v-if="m.status!=='conflict'" type="button" @click="retry(m.id)" class="px-2.5 py-1 rounded-lg bg-blue-700 text-white font-semibold">Retry</button>
+          <button v-if="m.status!=='conflict'" type="button" @click="remove(m.id)" class="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 font-semibold">Dismiss</button>
         </div>
       </div>
-      <p class="hint">{{ COPY.mutationHint }}</p>
+      <p class="text-[11px] text-slate-500 m-0">{{ COPY.mutationHint }}</p>
     </div>
   </div>
 </template>
@@ -64,34 +60,28 @@ import { computed, reactive, ref, watch } from 'vue'
 import { apiFetch } from '../lib/api'
 import { COPY } from '../lib/copy'
 import { useMutationStore } from '../stores/mutations'
+
 const store = useMutationStore()
 const open = ref(false)
+const uiNotice = ref('')
 const edits = reactive({})
 const server = reactive({})
 const conflictObj = reactive({})
 const mergeSel = reactive({})
-const serverPaste = reactive({})
+
 // Applied rows stay in IndexedDB as replay guards; only show work needing action.
 const items = computed(() => store.items.filter(i => i.status !== 'applied'))
 const syncing = computed(() => store.syncing)
 const pending = computed(() => items.value.filter(i => i.status === 'pending').length)
 const conflicts = computed(() => items.value.filter(i => i.status === 'conflict').length)
 
-// Parse/stringify once per change instead of on every render. Every map is
-// keyed by mutation id, so a single item's edit does not rework the others.
 function pretty(v) { try { return JSON.stringify(v ?? {}, null, 2) } catch { return String(v) } }
 
-const localParsed = computed(() => {
-  const out = {}
-  for (const id of Object.keys(edits)) {
-    try { out[id] = { ok: true, value: JSON.parse(edits[id] || '{}') } }
-    catch { out[id] = { ok: false, value: {} } }
-  }
-  return out
-})
 const localObjects = computed(() => {
   const out = {}
-  for (const id of Object.keys(localParsed.value)) out[id] = localParsed.value[id].value || {}
+  for (const id of Object.keys(edits)) {
+    try { out[id] = JSON.parse(edits[id] || '{}') } catch { out[id] = {} }
+  }
   return out
 })
 const serverObjects = computed(() => {
@@ -117,31 +107,24 @@ const diffKeysByItem = computed(() => {
   }
   return out
 })
-// Pre-rendered strings for the diff rows and conflict box: no JSON.stringify
-// calls left in the template's hot path.
+
 const formatted = computed(() => {
   const out = {}
   for (const m of items.value) {
     const id = m.id
     const l = localObjects.value[id] || {}
     const s = serverObjects.value[id] || {}
-    const c = conflictObjects.value[id] || {}
     const local = {}
     const remote = {}
-    const conflict = {}
     for (const k of diffKeysByItem.value[id] || []) {
       local[k] = pretty(l[k])
       remote[k] = pretty(s[k])
-      conflict[k] = pretty(c[k])
     }
-    out[id] = { conflictBox: pretty(m.conflict), local, server: remote, conflict }
+    out[id] = { local, server: remote }
   }
   return out
 })
 
-// Only new ids need seeding; existing (possibly in-progress) edits are kept.
-// items is recomputed when the store's array changes, so a shallow watch is
-// sufficient and avoids walking every nested mutation object on each render.
 watch(items, (list) => {
   for (const m of list) if (edits[m.id] === undefined) edits[m.id] = pretty(m.body)
 }, { immediate: true })
@@ -149,26 +132,7 @@ watch(items, (list) => {
 function retry(id) { store.retry(id) }
 function remove(id) { store.remove(id) }
 function dismiss(id) { store.remove(id) }
-function isFlat(v) { return v && typeof v === 'object' && !Array.isArray(v) && Object.values(v).every(x => ['string','number','boolean'].includes(typeof x) || x === null) }
-function fieldValue(id,k,orig) {
-  const parsed = localParsed.value[id]
-  if (parsed && (!parsed.ok || parsed.value == null)) return orig ?? ''
-  return (parsed?.value?.[k]) ?? ''
-}
-function setField(id,k,val,orig) {
-  let o = {}
-  try { o = JSON.parse(edits[id] || '{}') } catch { o = {} }
-  if (typeof orig === 'number') { const n = Number(val); o[k] = Number.isFinite(n) ? n : val }
-  else if (typeof orig === 'boolean') { o[k] = val === 'true' }
-  else o[k] = val
-  edits[id] = pretty(o)
-}
-async function savePayload(id) {
-  try {
-    const body = JSON.parse(edits[id] || '{}')
-    await store.updateBody(id, body)
-  } catch (e) { alert('Invalid JSON: ' + e.message) }
-}
+
 function readPathFor(m) {
   if (!m?.entityId) return null
   const id = encodeURIComponent(m.entityId)
@@ -187,6 +151,7 @@ function readPathFor(m) {
   }
   return map[m.entity] || null
 }
+
 function seedServerFromConflict(m) {
   const c = m?.conflict || {}
   const candidate = c.current || c.record || c.server || c.currentRecord || c
@@ -196,84 +161,40 @@ function seedServerFromConflict(m) {
   }
   return false
 }
+
 async function fetchServer(m) {
-  if (seedServerFromConflict(m)) {
-    mergeSel[m.id] = mergeSel[m.id] || {}
-    for (const k of diffKeys(m)) mergeSel[m.id][k] = mergeSel[m.id][k] || undefined
-    return
-  }
+  uiNotice.value = ''
+  if (seedServerFromConflict(m)) return
   const p = readPathFor(m)
-  if (!p) { alert('No server read endpoint mapped for this entity. Paste server JSON below.'); return }
+  if (!p) { uiNotice.value = 'No server read endpoint mapped for this entity.'; return }
   try {
     const res = await apiFetch(p)
     if (!res.ok) throw new Error(await res.text())
     server[m.id] = await res.json()
     if (!conflictObj[m.id]) conflictObj[m.id] = {}
-    mergeSel[m.id] = mergeSel[m.id] || {}
-    for (const k of diffKeys(m)) mergeSel[m.id][k] = mergeSel[m.id][k] || undefined
-  } catch (e) { alert('Failed to load server: ' + e.message) }
+  } catch (e) {
+    uiNotice.value = 'Failed to load server record: ' + e.message
+  }
 }
-function hasConflict(m,k) { const c = conflictObjects.value[m.id]; return !!(c && Object.prototype.hasOwnProperty.call(c, k)) }
-function pickOf(m,k) { const sel = mergeSel[m.id]; if (sel && sel[k]) return sel[k]; return autoPick(m,k) }
-function autoPick(m,k) {
+
+function pickOf(m, k) {
+  const sel = mergeSel[m.id]
+  if (sel && sel[k]) return sel[k]
   const l = (localObjects.value[m.id] || {})[k]
   const s = (serverObjects.value[m.id] || {})[k]
-  const c = (conflictObjects.value[m.id] || {})[k]
-  if (hasConflict(m,k)) {
-    if (l === s) return 'server'
-    if (c === s && l !== s) return 'conflict'
-    return 'local'
-  }
-  if (l === s) return 'server'
-  return 'local'
+  return l === s ? 'server' : 'local'
 }
-function diffKeys(m) { return diffKeysByItem.value[m.id] || [] }
-function choose(id,k,side) { mergeSel[id] = mergeSel[id] || {}; mergeSel[id][k] = side }
-function useServerPaste(m) {
-  try {
-    server[m.id] = JSON.parse(serverPaste[m.id] || '{}')
-    if (!conflictObj[m.id]) conflictObj[m.id] = {}
-    mergeSel[m.id] = mergeSel[m.id] || {}
-    for (const k of diffKeys(m)) mergeSel[m.id][k] = mergeSel[m.id][k] || undefined
-  } catch (e) { alert('Invalid JSON: ' + e.message) }
-}
+function choose(id, k, side) { mergeSel[id] = mergeSel[id] || {}; mergeSel[id][k] = side }
+
 async function applyMerge(m) {
   const l = localObjects.value[m.id] || {}
   const s = serverObjects.value[m.id] || {}
-  const c = conflictObjects.value[m.id] || {}
   const out = { ...l }
   for (const k of diffKeysByItem.value[m.id] || []) {
-    const pick = pickOf(m,k)
-    out[k] = pick === 'server' ? s[k] : pick === 'conflict' ? c[k] : l[k]
+    out[k] = pickOf(m, k) === 'server' ? s[k] : l[k]
   }
   edits[m.id] = pretty(out)
-  await savePayload(m.id)
+  await store.updateBody(m.id, out)
+  await store.retry(m.id)
 }
 </script>
-
-<style scoped>
-.mutation-status { position: fixed; left: 8px; right: 8px; bottom: 76px; background: #fff8e1; border: 1px solid #f0c36a; border-radius: 8px; padding: 8px; z-index: 50; font-size: 12px; }
-.row { display: flex; gap: 8px; align-items: center; }
-.link { margin-left: auto; background: none; border: none; color: #1f3a5f; text-decoration: underline; }
-.details { margin-top: 8px; max-height: 35vh; overflow: auto; }
-.item { border-top: 1px solid #ecd9a3; padding: 6px 0; }
-.item.conflict .badge { background: #b71c1c; }
-.meta { display: flex; gap: 8px; align-items: center; }
-.badge { background: #8a6d00; color: #fff; padding: 1px 6px; border-radius: 10px; font-size: 11px; }
-.path { color: #555; word-break: break-all; }
-.err { color: #7a1a00; margin: 4px 0; white-space: pre-wrap; }
-.conflict-box { background: #fff3f3; border: 1px solid #f2c2c2; padding: 4px; margin: 4px 0; font-size: 11px; }
-.conflict-box pre { margin: 2px 0 0; white-space: pre-wrap; }
-.payload pre { max-height: 120px; overflow: auto; background: #fff; padding: 4px; margin: 4px 0; font-size: 11px; }
-.edit { width: 100%; font-family: monospace; font-size: 11px; margin: 4px 0; }
-.fields { display: grid; gap: 4px; margin: 4px 0; }
-.field { display: grid; grid-template-columns: minmax(80px, 1fr) 2fr; gap: 6px; align-items: center; }
-.field input { width: 100%; font-size: 11px; padding: 2px 4px; }
-.diff { border: 1px solid #ddd; background: #fff; margin: 6px 0; padding: 4px; font-size: 11px; }
-.diff-head, .diff-row { display: grid; grid-template-columns: 1fr 2fr 2fr 70px; gap: 4px; align-items: start; padding: 2px 0; border-bottom: 1px solid #eee; }
-.diff-row .v { white-space: pre-wrap; word-break: break-word; max-height: 60px; overflow: auto; }
-.pick { display:flex; gap:6px; }
-.actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.actions button { font-size: 11px; padding: 2px 8px; }
-.hint { color: #555; margin: 8px 0 0; }
-</style>

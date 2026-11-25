@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 )
+
+const DeviceCookieName = "taj_device_token"
 
 var (
 	ErrMissingToken = errors.New("authorization required")
@@ -74,6 +77,16 @@ func Authenticate(r *http.Request) (Identity, error) {
 	// Authorization headers, so one request can never trigger two lookups.
 	token, err := bearerToken(r.Header.Get("Authorization"))
 	if err != nil {
+		// Fall back to HttpOnly paired-device cookie set during /api/pair
+		if c, cerr := r.Cookie(DeviceCookieName); cerr == nil && strings.TrimSpace(c.Value) != "" {
+			tok := strings.TrimSpace(c.Value)
+			if len(tok) <= maxTokenLen {
+				token = tok
+				err = nil
+			}
+		}
+	}
+	if err != nil {
 		return Identity{}, err
 	}
 	hash := Sha256Hex(token)
@@ -93,20 +106,29 @@ func Authenticate(r *http.Request) (Identity, error) {
 	return Identity{Kind: ToString(res.Rows[0][0]), ID: ToString(res.Rows[0][1])}, nil
 }
 
+// WriteStealth404 hides protected/unknown mobile relay routes behind a generic
+// 404 Not Found so web scanners and browsers cannot tell endpoints exist.
+func WriteStealth404(w http.ResponseWriter, r *http.Request) {
+	w.Header().Del("WWW-Authenticate")
+	http.NotFound(w, r)
+}
+
 // RequireAuth authenticates once per request and returns the identity for the
-// router to attach via WithIdentity. Transport/database errors are reported as
-// a fixed message: upstream error strings can contain raw response bodies.
+// router to attach via WithIdentity. Unauthenticated / invalid-token callers
+// receive a stealth 404 when STEALTH_404 != "0" (default ON).
 func RequireAuth(w http.ResponseWriter, r *http.Request) (Identity, bool) {
 	id, err := Authenticate(r)
 	if err == nil {
 		return id, true
 	}
-	status := http.StatusUnauthorized
-	message := err.Error()
-	if err != ErrMissingToken && err != ErrInvalidToken {
-		status = http.StatusInternalServerError
-		message = "authentication temporarily unavailable"
+	if err == ErrMissingToken || err == ErrInvalidToken {
+		if os.Getenv("STEALTH_404") != "0" {
+			WriteStealth404(w, r)
+			return Identity{}, false
+		}
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return Identity{}, false
 	}
-	http.Error(w, message, status)
+	http.Error(w, "authentication temporarily unavailable", http.StatusInternalServerError)
 	return Identity{}, false
 }

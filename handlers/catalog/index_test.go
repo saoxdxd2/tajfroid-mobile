@@ -109,8 +109,9 @@ func TestCatalogGetResponseShapeAndNotModified(t *testing.T) {
 		t.Fatalf("products has wrong shape: %#v", out["products"])
 	}
 	first := assertJSONKeys(t, mustMarshal(t, products[0]),
-		"sku", "name", "sale_price", "pinned_price", "effective_price", "priced",
-		"vat_rate", "stock", "active", "category", "brand")
+		"sku", "display_sku", "no_sku", "sku_warning", "name", "sale_price", "pinned_price",
+		"effective_price", "priced", "price_status", "vat_rate", "stock", "sealed_qty",
+		"is_return", "return_qty", "return_label", "active", "category", "brand")
 	if first["sku"] != "A-1" || first["name"] != "Alpha 🧊" || first["stock"] != float64(2) || first["active"] != true {
 		t.Fatalf("unexpected product: %#v", first)
 	}

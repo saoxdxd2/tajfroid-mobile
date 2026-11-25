@@ -142,18 +142,18 @@ func TestChaosMalformedRoutesAndWeirdMethods(t *testing.T) {
 		name, method, target string
 		want                 int
 	}{
-		{"oversized __route", http.MethodGet, "/api/router?__route=" + url.QueryEscape(huge), http.StatusUnauthorized},
-		{"NUL in __route", http.MethodGet, "/api/router?__route=" + url.QueryEscape("health\x00evil"), http.StatusUnauthorized},
-		{"newline in __route", http.MethodGet, "/api/router?__route=" + url.QueryEscape("health\nevil"), http.StatusUnauthorized},
-		{"traversal-looking __route", http.MethodGet, "/api/router?__route=..%2F..%2Fetc%2Fpasswd", http.StatusUnauthorized},
+		{"oversized __route", http.MethodGet, "/api/router?__route=" + url.QueryEscape(huge), http.StatusNotFound},
+		{"NUL in __route", http.MethodGet, "/api/router?__route=" + url.QueryEscape("health\x00evil"), http.StatusNotFound},
+		{"newline in __route", http.MethodGet, "/api/router?__route=" + url.QueryEscape("health\nevil"), http.StatusNotFound},
+		{"traversal-looking __route", http.MethodGet, "/api/router?__route=..%2F..%2Fetc%2Fpasswd", http.StatusNotFound},
 		{"repeated __route first public", http.MethodGet, "/api/router?__route=health&__route=invoices", http.StatusServiceUnavailable},
-		{"repeated __route first protected", http.MethodGet, "/api/router?__route=invoices&__route=health", http.StatusUnauthorized},
-		{"invalid percent escape", http.MethodGet, "/api/router?__route=%ZZ", http.StatusUnauthorized},
-		{"unknown route", http.MethodGet, "/api/router?__route=does-not-exist", http.StatusUnauthorized},
+		{"repeated __route first protected", http.MethodGet, "/api/router?__route=invoices&__route=health", http.StatusNotFound},
+		{"invalid percent escape", http.MethodGet, "/api/router?__route=%ZZ", http.StatusNotFound},
+		{"unknown route", http.MethodGet, "/api/router?__route=does-not-exist", http.StatusNotFound},
 		{"PROPFIND on health", "PROPFIND", "/api/router?__route=health", http.StatusServiceUnavailable},
 		{"BREW on pair", "BREW", "/api/router?__route=pair", http.StatusMethodNotAllowed},
-		{"PATCH on protected route", http.MethodPatch, "/api/router?__route=products/manage", http.StatusUnauthorized},
-		{"empty __route", http.MethodGet, "/api/router?__route=&__route=health", http.StatusUnauthorized},
+		{"PATCH on protected route", http.MethodPatch, "/api/router?__route=products/manage", http.StatusNotFound},
+		{"empty __route", http.MethodGet, "/api/router?__route=&__route=health", http.StatusNotFound},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -274,13 +274,13 @@ func TestChaosAuthAbuseDoesOneLookupAndNeverLeaks(t *testing.T) {
 		want                int
 		lookups             int
 	}{
-		{name: "missing", want: http.StatusUnauthorized},
-		{name: "malformed", header: "Basic abc", want: http.StatusUnauthorized},
-		{name: "oversized", header: "Bearer " + strings.Repeat("z", 10*1024), want: http.StatusUnauthorized},
+		{name: "missing", want: http.StatusNotFound},
+		{name: "malformed", header: "Basic abc", want: http.StatusNotFound},
+		{name: "oversized", header: "Bearer " + strings.Repeat("z", 10*1024), want: http.StatusNotFound},
 		{name: "valid replay 1", token: tokenA, want: http.StatusOK, lookups: 1},
 		{name: "valid replay 2", token: tokenA, want: http.StatusOK, lookups: 1},
 		{name: "other valid token", token: tokenB, want: http.StatusOK, lookups: 1},
-		{name: "random token", token: "chaos-random-token", want: http.StatusUnauthorized, lookups: 1},
+		{name: "random token", token: "chaos-random-token", want: http.StatusNotFound, lookups: 1},
 	}
 	for _, tc := range sequential {
 		before := mock.lookupCount()
@@ -318,7 +318,7 @@ func TestChaosAuthAbuseDoesOneLookupAndNeverLeaks(t *testing.T) {
 				want := http.StatusOK
 				if i%2 == 1 {
 					token = "chaos-random-" + string(rune('a'+i%26))
-					want = http.StatusUnauthorized
+					want = http.StatusNotFound
 				}
 				rec := chaosDo(t, http.MethodGet, target, token, nil)
 				if rec.Code != want {
@@ -448,8 +448,8 @@ func TestChaosMetricsCardinalityThroughRouter(t *testing.T) {
 		for i := 0; i < routes; i++ {
 			target := "/api/router?__route=chaos-unique-" + strconv.Itoa(i)
 			rec := chaosDo(t, http.MethodGet, target, "", nil)
-			if rec.Code != http.StatusUnauthorized {
-				t.Errorf("request %d: status = %d, want 401", i, rec.Code)
+			if rec.Code != http.StatusNotFound {
+				t.Errorf("request %d: status = %d, want 404", i, rec.Code)
 			}
 		}
 	})

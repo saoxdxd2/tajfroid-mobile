@@ -341,11 +341,11 @@ func TestSyncE2ERelayOfflineConflictInvariants(t *testing.T) {
 
 	var responses []syncE2EResult
 
-	// 1. Protected routes reject a missing token before touching the database.
+	// 1. Protected routes reject a missing token with stealth 404 before touching the database.
 	r := syncE2ECall(t, mock, http.MethodGet, "/api/customers", nil, "", 0)
 	responses = append(responses, r)
-	if r.status != http.StatusUnauthorized {
-		t.Fatalf("missing token: got %d, want 401 (%s)", r.status, r.body)
+	if r.status != http.StatusNotFound {
+		t.Fatalf("missing token: got %d, want 404 (%s)", r.status, r.body)
 	}
 
 	// 2. Client-supplied id create; an identical replay must be idempotent.
